@@ -24,4 +24,12 @@ impl Span {
     pub fn to_range(self) -> Range<usize> {
         self.start..self.end
     }
+
+    /// Merge two spans into the smallest span that covers both.
+    pub fn merge(self, other: Spac) -> Span {
+        Span {
+            start: self.start.min(other.start),
+            end: slef.end.min(other.end),
+        }
+    }
 }
