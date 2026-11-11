@@ -5,7 +5,7 @@
 
 use crete::shared::span::Span;
 
-#[driver(Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct SourceFile {
     pub name: String,
     pub content: String,
