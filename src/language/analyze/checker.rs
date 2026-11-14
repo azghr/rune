@@ -7,10 +7,20 @@ use crate::language::analyze::scope::{ScopeStack, Symbol};
 use crate::language::ast::*;
 use crate::language::token::TokenKind;
 use crate::shared::span::Span;
+use std::collections::HashMap;
+
+/// The signature of a declared function, collected before bodies are checked
+/// so that recursion and forward references type-check.
+#[derive(Debug, Clone)]
+struct FunctionSignature {
+    params: Vec<Type>,
+    return_type: Type,
+}
 
 pub struct Analyzer {
     scopes: ScopeStack,
     current_return_type: Option<Type>,
+    functions: HashMap<String, FunctionSignature>,
     errors: Vec<Diagnostic>,
 }
 
@@ -25,11 +35,31 @@ impl Analyzer {
         Self {
             scopes: ScopeStack::new(),
             current_return_type: None,
+            functions: HashMap::new(),
             errors: Vec::new(),
         }
     }
 
     pub fn analyze(mut self, program: Program) -> Result<Program, Vec<Diagnostic>> {
+        // First pass: collect signatures so calls resolve regardless of
+        // definition order.
+        for func in &program.functions {
+            let signature = FunctionSignature {
+                params: func.params.iter().map(|p| p.ty.clone()).collect(),
+                return_type: func.return_type.clone().unwrap_or(Type::Void),
+            };
+            if self
+                .functions
+                .insert(func.name.clone(), signature)
+                .is_some()
+            {
+                self.error(
+                    format!("function `{}` is already defined", func.name),
+                    func.span,
+                );
+            }
+        }
+
         for func in &program.functions {
             self.analyze_function(func);
         }
@@ -251,7 +281,7 @@ impl Analyzer {
                 }
             }
             Expr::Call { callee, args, span } => {
-                // Very simple: we only support a few built-ins for now
+                // The only builtin: everything else must be a declared function.
                 match callee.as_str() {
                     "print" => {
                         if args.len() != 1 {
@@ -261,13 +291,45 @@ impl Analyzer {
                         }
                         Type::Void
                     }
-                    _ => {
-                        // User functions – for now just accept and return Int
-                        for arg in args {
-                            self.analyze_expr(arg);
+                    name => match self.functions.get(name).cloned() {
+                        Some(signature) => {
+                            if args.len() != signature.params.len() {
+                                self.error(
+                                    format!(
+                                        "function `{}` expects {} argument(s), found {}",
+                                        name,
+                                        signature.params.len(),
+                                        args.len()
+                                    ),
+                                    *span,
+                                );
+                            }
+                            for (arg, param_ty) in args.iter().zip(&signature.params) {
+                                let arg_ty = self.analyze_expr(arg);
+                                if arg_ty != *param_ty {
+                                    self.error(
+                                        format!(
+                                            "argument type mismatch: expected `{}`, found `{}`",
+                                            type_name(param_ty),
+                                            type_name(&arg_ty)
+                                        ),
+                                        arg.span(),
+                                    );
+                                }
+                            }
+                            // Analyze any excess arguments so their own errors
+                            // still get reported.
+                            for arg in args.iter().skip(signature.params.len()) {
+                                self.analyze_expr(arg);
+                            }
+                            signature.return_type
                         }
-                        Type::Int
-                    }
+                        None => {
+                            self.error(format!("call to undefined function `{}`", name), *span);
+                            // Recovery type so the rest of the function still checks.
+                            Type::Int
+                        }
+                    },
                 }
             }
             Expr::Grouping { expr, .. } => self.analyze_expr(expr),

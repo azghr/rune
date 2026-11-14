@@ -14,6 +14,24 @@ impl Parser {
         self.matches(&[TokenKind::Semicolon]);
     }
 
+    /// Whether the current token can begin an expression. Used to decide
+    /// whether a statement like `return` carries a value: `return }` or a
+    /// `return` followed by another statement yields no value.
+    fn starts_expression(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokenKind::Int(_)
+                | TokenKind::String(_)
+                | TokenKind::Ident(_)
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Print
+                | TokenKind::LParen
+                | TokenKind::Minus
+                | TokenKind::Bang
+        )
+    }
+
     pub fn parse_statement(&mut self) -> Result<Stmt, Diagnostic> {
         if self.matches(&[TokenKind::Let]) {
             self.parse_let()
@@ -108,10 +126,10 @@ impl Parser {
 
     fn parse_return(&mut self) -> Result<Stmt, Diagnostic> {
         let start_span = self.previous().span;
-        let value = if self.check(&TokenKind::Semicolon) {
-            None
-        } else {
+        let value = if self.starts_expression() {
             Some(self.parse_expression()?)
+        } else {
+            None
         };
         self.end_of_statement();
         Ok(Stmt::Return {

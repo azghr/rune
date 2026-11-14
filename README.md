@@ -106,7 +106,7 @@ More examples live in [`examples/`](examples).
 - [x] Type checker with lexical scopes
 - [x] Three-address IR with constant folding and dead code elimination
 - [x] C code generation with a small runtime
-- [ ] Integration tests and a real test suite
+- [x] Integration tests and a real test suite
 - [ ] Strings as a first-class value type
 - [ ] Functions as values / closures
 - [ ] LLVM or WASM backend
