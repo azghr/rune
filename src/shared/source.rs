@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Source file abstraction.
 //!
 //! Holds the raw source text and provides helpers for turning byte offsets

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Type checker and semantic analyzer.
 
 use crate::diagnostics::diagnostic::Diagnostic;

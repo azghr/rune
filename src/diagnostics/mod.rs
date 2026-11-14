@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Diagnostic and error reporting system.
 
 pub mod diagnostic;

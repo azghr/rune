@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Statement parsing for Rune.
 
 use super::Parser;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Very simple dead code elimination.
 //!
 //! Removes instructions whose results are never used.

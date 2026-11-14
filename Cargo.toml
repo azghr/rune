@@ -3,5 +3,12 @@ name = "rune"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "A small, statically typed programming language that compiles to C"
+authors = ["azghr <masgharali.eng@gmail.com>"]
+repository = "https://github.com/azghr/rune"
+homepage = "https://github.com/azghr/rune"
+readme = "README.md"
+keywords = ["compiler", "language", "programming-language", "transpiler"]
+categories = ["compilers", "development-tools"]
 
 [dependencies]

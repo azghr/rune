@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Recursive-descent parser for Rune.
 //!
 //! Entry point: `parse_program`.

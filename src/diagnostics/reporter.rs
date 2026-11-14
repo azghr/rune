@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Pretty-prints diagnostics with source context.
 
 use crate::diagnostics::diagnostic::{Diagnostic, Severity};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Rune compiler library.
 
 pub mod diagnostics;

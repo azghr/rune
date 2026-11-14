@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! High-level compilation pipeline.
 
 use crate::diagnostics::reporter::Reporter;

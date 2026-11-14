@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Expression parsing (precedence climbing via recursive descent).
 
 use super::Parser;

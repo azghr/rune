@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Source location tracking.
 //!
 //! A `Span` represents a half-open byte range in the original source file.

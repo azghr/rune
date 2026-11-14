@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Shared utilities used across the entire compiler.
 
 pub mod source;

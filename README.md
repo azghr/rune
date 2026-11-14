@@ -2,25 +2,28 @@
 
 # Rune
 
-![Rust](https://img.shields.io/badge/rust-1.85%2B-DEA584?logo=rust&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-in%20development-orange)
+A small, statically typed programming language written in Rust.
+
+[![CI](https://github.com/azghr/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/azghr/rune/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Status](https://img.shields.io/badge/status-in%20development-orange)]()
 
 </div>
 
-A small, statically typed programming language written in Rust. Rune uses a
-classic compiler pipeline — lexing, parsing, semantic analysis, IR
+Rune uses a classic compiler pipeline — lexing, parsing, semantic analysis, IR
 transformation, and code generation. The compiler currently emits C, which is
 compiled with the system `gcc` and linked against a small C runtime.
 
-> **Status: early development.** The pipeline is scaffolded end to end, but the
-> crate does not yet compile. See [Roadmap](#roadmap) for what's done and what's
-> missing.
+> **Status: early development.** The pipeline is scaffolded end to end and the
+> language is usable for small programs, but Rune is still missing many
+> features. See [Roadmap](#roadmap) for what's done and what's planned.
 
 ## Features
 
 - Statically typed with `int`, `bool`, `string`, and `void`
 - C-family syntax: functions, `let` bindings, `if`/`else`, `while`, `return`
+- Logical operators (`&&`, `||`) with correct precedence
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
 - A simple three-address IR with constant folding and dead code elimination
@@ -31,7 +34,7 @@ compiled with the system `gcc` and linked against a small C runtime.
 ### Prerequisites
 
 - Rust 1.85 or newer (Rune uses edition 2024)
-- A C compiler (`gcc`) on your `PATH` for building the runtime
+- A C compiler (`gcc`) on your `PATH`
 
 ### Building
 
@@ -47,7 +50,7 @@ The driver compiles a `.rune` file to C, invokes `gcc`, and produces an
 executable in the working directory:
 
 ```sh
-cargo run -- examples/hello.rune
+cargo run --release -- examples/hello.rune
 ./output
 ```
 
@@ -75,10 +78,44 @@ fn main() {
 - Statements are newline/semicolon separated; semicolons are accepted.
 - All integers are 64-bit signed (`i64` / C `int64_t`).
 
+More examples live in [`examples/`](examples).
+
+## Project Structure
+
+```
+├── src/
+│   ├── language/      # lexer, parser, AST, type checker, scopes
+│   ├── diagnostics/   # diagnostics and source-context reporting
+│   ├── transform/     # three-address IR and optimization passes
+│   ├── emit/          # C code generation (LLVM/WASM are future targets)
+│   ├── driver/        # high-level compile pipeline
+│   └── shared/        # source files and spans
+├── runtime/           # small C runtime linked into every binary
+├── examples/          # example Rune programs
+├── docs/              # design and architecture notes
+└── tests/             # lexer, parser, analysis, and emit tests
+```
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — how the compiler pipeline fits together
+
+## Roadmap
+
+- [x] Lexer, parser, and AST
+- [x] Type checker with lexical scopes
+- [x] Three-address IR with constant folding and dead code elimination
+- [x] C code generation with a small runtime
+- [ ] Integration tests and a real test suite
+- [ ] Strings as a first-class value type
+- [ ] Functions as values / closures
+- [ ] LLVM or WASM backend
+
 ## Contributing
 
-Contributions are welcome. Open an issue to discuss a change before submitting
-a pull request, and make sure the test suite passes before submitting.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) to
+get started, and note that this project follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

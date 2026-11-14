@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Lexical scope and symbol table.
 
 use crate::language::ast::Type;

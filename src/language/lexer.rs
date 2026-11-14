@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! lexer for Rune.
 //!
 //! Turns source text into a stream of tokens while tracking precise spans.

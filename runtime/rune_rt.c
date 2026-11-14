@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "rune_rt.h"
 #include <stdio.h>
 

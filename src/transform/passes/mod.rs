@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Transformation passes over the IR.
 
 pub mod const_fold;

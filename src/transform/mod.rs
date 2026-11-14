@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Intermediate representation and transformation passes.
 //!
 //! Currently provides a simple IR and two example passes:

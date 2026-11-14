@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Top-level declarations (currently only functions).
 
 use super::Parser;

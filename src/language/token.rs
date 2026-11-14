@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Token definitions for the Rune language.
 
 use crate::shared::span::Span;

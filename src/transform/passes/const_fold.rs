@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Constant folding pass.
 //!
 //! Evaluates constant expressions at compile time and replaces them

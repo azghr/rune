@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #ifndef RUNE_RT_H
 #define RUNE_RT_H
 

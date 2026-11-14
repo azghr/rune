@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Language frontend: lexing, parsing and semantic analysis.
 
 pub mod analyze;

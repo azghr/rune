@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Simple three-address style Intermediate Representation.
 //!
 //! This IR is intentionally small so it is easy to understand and transform.

@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a problem with the Rune compiler or language
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: A minimal `.rune` program that reproduces the issue, plus the compiler output or generated C.
+      placeholder: |
+        fn main() {
+            ...
+        }
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Environment
+      description: OS and Rust version (`rustc --version`).
+    validations:
+      required: true

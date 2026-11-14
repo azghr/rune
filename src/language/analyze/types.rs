@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Type system for Rune.
 
 use crate::language::ast::Type;

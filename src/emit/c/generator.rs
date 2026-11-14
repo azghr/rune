@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! C code generator for Rune.
 //!
 //! Produces readable C99 that can be compiled with gcc/clang.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Core diagnostic type used throughout the compiler.
 
 use crate::shared::span::Span;

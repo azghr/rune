@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Rune compiler CLI.
 
 use rune::Compiler;

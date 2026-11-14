@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Abstract Syntax Tree definitions for Rune.
 
 use crate::language::token::TokenKind;

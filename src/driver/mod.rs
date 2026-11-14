@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Compilation driver.
 
 pub mod compiler;
