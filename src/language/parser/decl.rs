@@ -20,11 +20,14 @@ impl Parser {
         let mut params = Vec::new();
         if !self.check(&TokenKind::RParen) {
             loop {
-                let param_name_tok =
-                    self.consume(TokenKind::Ident(String::new()), "expected parameter name")?;
-                let param_name = match &param_name_tok.kind {
-                    TokenKind::Ident(n) => n.clone(),
-                    _ => unreachable!(),
+                let (param_name, param_span) = {
+                    let tok =
+                        self.consume(TokenKind::Ident(String::new()), "expected parameter name")?;
+                    let name = match &tok.kind {
+                        TokenKind::Ident(n) => n.clone(),
+                        _ => unreachable!(),
+                    };
+                    (name, tok.span)
                 };
 
                 self.consume(TokenKind::Colon, "expected `:` after parameter name")?;
@@ -33,7 +36,7 @@ impl Parser {
                 params.push(Param {
                     name: param_name,
                     ty,
-                    span: param_name_tok.span,
+                    span: param_span,
                 });
 
                 if !self.matches(&[TokenKind::Comma]) {
@@ -52,13 +55,14 @@ impl Parser {
 
         self.consume(TokenKind::LBrace, "expected `{` before function body")?;
         let body = self.parse_block_after_lbrace()?;
+        let span = start_span.merge(body.span);
 
         Ok(Function {
             name,
             params,
             return_type,
             body,
-            span: start_span.merge(body.span),
+            span,
         })
     }
 }

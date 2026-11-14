@@ -25,22 +25,21 @@ impl ConstFold {
                 right,
                 ty,
             } = inst
+                && let (Some(l), Some(r)) = (Self::as_const_int(left), Self::as_const_int(right))
             {
-                if let (Some(l), Some(r)) = (Self::as_const_int(left), Self::as_const_int(right)) {
-                    let result = match op {
-                        BinOp::Add => l + r,
-                        BinOp::Sub => l - r,
-                        BinOp::Mul => l * r,
-                        BinOp::Div if r != 0 => l / r,
-                        BinOp::Mod if r != 0 => l % r,
-                        _ => continue,
-                    };
-                    *inst = Instruction::Move {
-                        dest: dest.clone(),
-                        value: Value::ConstInt(result),
-                        ty: ty.clone(),
-                    };
-                }
+                let result = match op {
+                    BinOp::Add => l + r,
+                    BinOp::Sub => l - r,
+                    BinOp::Mul => l * r,
+                    BinOp::Div if r != 0 => l / r,
+                    BinOp::Mod if r != 0 => l % r,
+                    _ => continue,
+                };
+                *inst = Instruction::Move {
+                    dest: dest.clone(),
+                    value: Value::ConstInt(result),
+                    ty: ty.clone(),
+                };
             }
         }
     }

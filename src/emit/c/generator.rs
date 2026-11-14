@@ -11,6 +11,12 @@ pub struct CGenerator {
     indent: usize,
 }
 
+impl Default for CGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CGenerator {
     pub fn new() -> Self {
         Self {
@@ -21,6 +27,14 @@ impl CGenerator {
 
     pub fn generate(mut self, program: &Program) -> String {
         self.emit_headers();
+        // Forward declarations so functions can call each other regardless
+        // of the order they appear in the source.
+        for func in &program.functions {
+            let mut prototype = self.signature(func);
+            prototype.push(';');
+            self.line(&prototype);
+        }
+        self.line("");
         for func in &program.functions {
             self.emit_function(func);
         }
@@ -35,19 +49,25 @@ impl CGenerator {
         self.line("");
     }
 
-    fn emit_function(&mut self, func: &Function) {
-        let ret = match &func.return_type {
-            Some(Type::Int) => "int64_t",
-            Some(Type::Bool) => "bool",
-            Some(Type::String) => "const char*",
-            Some(Type::Void) | None => "void",
+    /// Builds the C signature (return type, name, parameters) for a function.
+    fn signature(&self, func: &Function) -> String {
+        let ret = if func.name == "main" {
+            // C requires `main` to return `int`
+            "int"
+        } else {
+            match &func.return_type {
+                Some(Type::Int) => "int64_t",
+                Some(Type::Bool) => "bool",
+                Some(Type::String) => "const char*",
+                Some(Type::Void) | None => "void",
+            }
         };
 
-        write!(self.output, "{} {}(", ret, func.name).unwrap();
+        let mut sig = format!("{} {}(", ret, func.name);
 
         for (i, param) in func.params.iter().enumerate() {
             if i > 0 {
-                self.output.push_str(", ");
+                sig.push_str(", ");
             }
             let ty = match param.ty {
                 Type::Int => "int64_t",
@@ -55,15 +75,26 @@ impl CGenerator {
                 Type::String => "const char*",
                 Type::Void => "void",
             };
-            write!(self.output, "{} {}", ty, param.name).unwrap();
+            sig.push_str(&format!("{} {}", ty, param.name));
         }
 
-        self.output.push_str(") {\n");
+        sig.push(')');
+        sig
+    }
+
+    fn emit_function(&mut self, func: &Function) {
+        let sig = self.signature(func);
+        self.output.push_str(&sig);
+        self.output.push_str(" {\n");
         self.indent += 1;
 
         self.emit_block(&func.body);
 
         self.indent -= 1;
+        if func.name == "main" {
+            self.indent_write();
+            self.output.push_str("return 0;\n");
+        }
         self.line("}");
         self.line("");
     }
@@ -116,14 +147,14 @@ impl CGenerator {
                 self.emit_block(then_branch);
                 self.indent -= 1;
                 self.indent_write();
-                self.output.push_str("}");
+                self.output.push('}');
                 if let Some(else_b) = else_branch {
                     self.output.push_str(" else {\n");
                     self.indent += 1;
                     self.emit_block(else_b);
                     self.indent -= 1;
                     self.indent_write();
-                    self.output.push_str("}");
+                    self.output.push('}');
                 }
                 self.output.push('\n');
             }
@@ -164,13 +195,13 @@ impl CGenerator {
                 self.output.push('(');
                 self.emit_expr(left);
                 self.output.push(' ');
-                self.output.push_str(op_to_c(op));
+                self.output.push_str(Self::op_to_c(op));
                 self.output.push(' ');
                 self.emit_expr(right);
                 self.output.push(')');
             }
             Expr::Unary { op, expr, .. } => {
-                self.output.push_str(op_to_c(op));
+                self.output.push_str(Self::op_to_c(op));
                 self.emit_expr(expr);
             }
             Expr::Call { callee, args, .. } => {

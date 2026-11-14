@@ -4,9 +4,14 @@ use super::Parser;
 use crate::diagnostics::diagnostic::Diagnostic;
 use crate::language::ast::{Block, Expr, Stmt};
 use crate::language::token::TokenKind;
-use crate::shared::span::Span;
 
 impl Parser {
+    /// Accepts an optional statement terminator (`;`). Newlines are skipped
+    /// by the lexer, so statements may also be separated by line breaks.
+    fn end_of_statement(&mut self) {
+        self.matches(&[TokenKind::Semicolon]);
+    }
+
     pub fn parse_statement(&mut self) -> Result<Stmt, Diagnostic> {
         if self.matches(&[TokenKind::Let]) {
             self.parse_let()
@@ -22,20 +27,21 @@ impl Parser {
         } else {
             // Expression statement or assignment
             let expr = self.parse_expression()?;
-            if let Expr::Variable { name, span } = &expr {
-                if self.matches(&[TokenKind::Eq]) {
-                    let value = self.parse_expression()?;
-                    self.consume(TokenKind::Semicolon, "expected `;` after assignment")?;
-                    return Ok(Stmt::Assign {
-                        name: name.clone(),
-                        value,
-                        span: span.merge(value.span()),
-                    });
-                }
-
-                self.consume(TokenKind::Semicolon, "expected `;` after expression")?;
-                Ok(Stmt::Expr(expr))
+            if let Expr::Variable { name, span } = &expr
+                && self.matches(&[TokenKind::Eq])
+            {
+                let value = self.parse_expression()?;
+                let value_span = value.span();
+                self.end_of_statement();
+                return Ok(Stmt::Assign {
+                    name: name.clone(),
+                    value,
+                    span: span.merge(value_span),
+                });
             }
+
+            self.end_of_statement();
+            Ok(Stmt::Expr(expr))
         }
     }
 
@@ -46,7 +52,7 @@ impl Parser {
             TokenKind::Ident(n) => n.clone(),
             _ => unreachable!(),
         };
-        let ty = if self.matches(&[TokenKind.Colon]) {
+        let ty = if self.matches(&[TokenKind::Colon]) {
             Some(self.parse_type()?)
         } else {
             None
@@ -54,7 +60,7 @@ impl Parser {
 
         self.consume(TokenKind::Eq, "expected `=` after variable name")?;
         let value = self.parse_expression()?;
-        self.consume(TokenKind::Semicolon, "expected `;` after let statement")?;
+        self.end_of_statement();
 
         Ok(Stmt::Let {
             name,
@@ -74,7 +80,7 @@ impl Parser {
             self.consume(TokenKind::LBrace, "expected `{` after else")?;
             Some(self.parse_block_after_lbrace()?)
         } else {
-            Nond
+            None
         };
 
         Ok(Stmt::If {
@@ -105,7 +111,7 @@ impl Parser {
         } else {
             Some(self.parse_expression()?)
         };
-        self.consume(TokenKind::Semicolon, "expected `;` after return")?;
+        self.end_of_statement();
         Ok(Stmt::Return {
             value,
             span: start_span.merge(self.previous().span),

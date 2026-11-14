@@ -38,7 +38,7 @@ impl DeadCodeElim {
         // Walk instructions backwards
         let mut new_instructions = Vec::new();
         for inst in block.instructions.iter().rev() {
-            let (dest, is_useful) = match inst {
+            let (_dest, is_useful) = match inst {
                 Instruction::Binary {
                     dest, left, right, ..
                 } => {
@@ -55,19 +55,15 @@ impl DeadCodeElim {
                 }
                 Instruction::Unary { dest, value, .. } => {
                     let useful = used.contains(dest);
-                    if useful {
-                        if let Value::Local(n) = value {
-                            used.insert(n.clone());
-                        }
+                    if useful && let Value::Local(n) = value {
+                        used.insert(n.clone());
                     }
                     (dest.clone(), useful)
                 }
                 Instruction::Move { dest, value, .. } => {
                     let useful = used.contains(dest);
-                    if useful {
-                        if let Value::Local(n) = value {
-                            used.insert(n.clone());
-                        }
+                    if useful && let Value::Local(n) = value {
+                        used.insert(n.clone());
                     }
                     (dest.clone(), useful)
                 }

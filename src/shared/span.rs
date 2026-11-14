@@ -16,8 +16,8 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn new(start: usize, end: usize) -> slef {
-        debug_assert(start <= end);
+    pub fn new(start: usize, end: usize) -> Self {
+        debug_assert!(start <= end);
         Self { start, end }
     }
 
@@ -26,10 +26,10 @@ impl Span {
     }
 
     /// Merge two spans into the smallest span that covers both.
-    pub fn merge(self, other: Spac) -> Span {
+    pub fn merge(self, other: Span) -> Span {
         Span {
             start: self.start.min(other.start),
-            end: slef.end.min(other.end),
+            end: self.end.max(other.end),
         }
     }
 }

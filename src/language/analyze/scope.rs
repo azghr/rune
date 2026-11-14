@@ -17,6 +17,12 @@ pub struct Scope {
     symbols: HashMap<String, Symbol>,
 }
 
+impl Default for Scope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scope {
     pub fn new() -> Self {
         Self {
@@ -35,7 +41,7 @@ impl Scope {
         Ok(())
     }
 
-    pub fn get(&self, name: str) -> Option<&Symbol> {
+    pub fn get(&self, name: &str) -> Option<&Symbol> {
         self.symbols.get(name)
     }
 }
@@ -43,6 +49,12 @@ impl Scope {
 #[derive(Debug)]
 pub struct ScopeStack {
     scopes: Vec<Scope>,
+}
+
+impl Default for ScopeStack {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScopeStack {
@@ -65,7 +77,7 @@ impl ScopeStack {
     }
 
     pub fn resolve(&self, name: &str) -> Option<&Symbol> {
-        for scope in self.scopes.iter().rec() {
+        for scope in self.scopes.iter().rev() {
             if let Some(sym) = scope.get(name) {
                 return Some(sym);
             }

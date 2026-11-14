@@ -9,7 +9,6 @@ mod stmt;
 use crate::diagnostics::diagnostic::Diagnostic;
 use crate::language::ast::Program;
 use crate::language::token::{Token, TokenKind};
-use crate::shared::span::Span;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -30,7 +29,7 @@ impl Parser {
     }
 
     // ----- token helpers
-    pub(crate) fn peak(&self) -> &Token {
+    pub(crate) fn peek(&self) -> &Token {
         &self.tokens[self.current]
     }
 
@@ -72,9 +71,5 @@ impl Parser {
         } else {
             Err(Diagnostic::error(msg, self.peek().span))
         }
-    }
-
-    pub(crate) fn current_span(&self) -> Span {
-        self.peek().span
     }
 }

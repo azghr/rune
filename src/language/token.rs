@@ -2,11 +2,10 @@
 
 use crate::shared::span::Span;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     // Literals
     Int(i64),
-    Float(f64),
     String(String),
     Ident(String),
 

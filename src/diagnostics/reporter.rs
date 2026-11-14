@@ -1,6 +1,6 @@
 //! Pretty-prints diagnostics with source context.
 
-use crate::diagnostics::diagnostic::{Diagnostics, Severity};
+use crate::diagnostics::diagnostic::{Diagnostic, Severity};
 use crate::shared::source::SourceFile;
 
 pub struct Reporter<'a> {
@@ -26,7 +26,7 @@ impl<'a> Reporter<'a> {
         );
 
         // Simple context line
-        if let Some(line_text) = self.source.content.line().nth(line - 1) {
+        if let Some(line_text) = self.source.content.lines().nth(line - 1) {
             eprintln!("  {}", line_text);
             eprint!("  ");
             for _ in 0..col.saturating_sub(1) {

@@ -7,7 +7,25 @@ use crate::language::token::TokenKind;
 
 impl Parser {
     pub fn parse_expression(&mut self) -> Result<Expr, Diagnostic> {
-        self.parse_equality();
+        self.parse_logical()
+    }
+
+    fn parse_logical(&mut self) -> Result<Expr, Diagnostic> {
+        let mut expr = self.parse_equality()?;
+
+        while self.matches(&[TokenKind::AmpAmp, TokenKind::PipePipe]) {
+            let op = self.previous().kind.clone();
+            let right = self.parse_equality()?;
+            let span = expr.span().merge(right.span());
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(expr)
     }
 
     fn parse_equality(&mut self) -> Result<Expr, Diagnostic> {
@@ -21,7 +39,7 @@ impl Parser {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
-                right: Box::new(expr),
+                right: Box::new(right),
                 span,
             };
         }
@@ -30,7 +48,7 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, Diagnostic> {
-        let mut expr = self.parse_term();
+        let mut expr = self.parse_term()?;
 
         while self.matches(&[
             TokenKind::Less,
@@ -39,7 +57,7 @@ impl Parser {
             TokenKind::GreaterEq,
         ]) {
             let op = self.previous().kind.clone();
-            let right = self.parse_term();
+            let right = self.parse_term()?;
             let span = expr.span().merge(right.span());
             expr = Expr::Binary {
                 left: Box::new(expr),
@@ -101,58 +119,61 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
         let token = self.advance();
-        match &token.kind {
-            TokenKind::Int(v) => Ok(Expr::Int {
-                value: *v,
-                span: token.span,
-            }),
-            TokenKind::True => Ok(Expr::Bool {
-                value: true,
-                span: token.span,
-            }),
-            TokenKind::False => Ok(Expr::Bool {
-                value: false,
-                span: token.span,
-            }),
-            TokenKind::String(s) => Ok(Expr::String {
-                value: s.clone(),
-                span: token.span,
-            }),
-            TokenKind::Inent(name) => {
+        let span = token.span;
+        let kind = token.kind.clone();
+
+        match kind {
+            TokenKind::Int(v) => Ok(Expr::Int { value: v, span }),
+            TokenKind::True => Ok(Expr::Bool { value: true, span }),
+            TokenKind::False => Ok(Expr::Bool { value: false, span }),
+            TokenKind::String(s) => Ok(Expr::String { value: s, span }),
+            TokenKind::Ident(name) => {
                 if self.matches(&[TokenKind::LParen]) {
-                    // function call
-                    let mut args = Vec::new();
-                    if !self.check(&TokenKind::RParen) {
-                        loop {
-                            args.push(self.parse_expression()?);
-                            if !self.matches(&[TokenKind::Comma]) {
-                                break;
-                            }
-                        }
-                    }
-                    let end = self.consume(TokenKind::RParen, "expected `)` after arguments")?;
+                    let args = self.parse_call_args()?;
                     Ok(Expr::Call {
-                        allee: name.clone(),
+                        callee: name,
                         args,
-                        span: token.span.merge(end.span),
+                        span: span.merge(self.previous().span),
                     })
                 } else {
-                    Ok(Expr::Variable {
-                        name: name.clone(),
-                        span: token.span,
-                    })
+                    Ok(Expr::Variable { name, span })
                 }
+            }
+            TokenKind::Print => {
+                // `print` is a keyword but reads as a builtin call expression
+                self.consume(TokenKind::LParen, "expected `(` after `print`")?;
+                let args = self.parse_call_args()?;
+                Ok(Expr::Call {
+                    callee: "print".to_string(),
+                    args,
+                    span: span.merge(self.previous().span),
+                })
             }
             TokenKind::LParen => {
                 let expr = self.parse_expression()?;
                 let end = self.consume(TokenKind::RParen, "expected `)` after expression")?;
                 Ok(Expr::Grouping {
                     expr: Box::new(expr),
-                    span: token.span.merge(end.span),
+                    span: span.merge(end.span),
                 })
             }
-            _ => Err(Diagnostic::error("expected expression", token.span)),
+            _ => Err(Diagnostic::error("expected expression", span)),
         }
+    }
+
+    /// Parses a parenthesized argument list, after the opening `(`.
+    fn parse_call_args(&mut self) -> Result<Vec<Expr>, Diagnostic> {
+        let mut args = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            loop {
+                args.push(self.parse_expression()?);
+                if !self.matches(&[TokenKind::Comma]) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenKind::RParen, "expected `)` after arguments")?;
+        Ok(args)
     }
 }
 

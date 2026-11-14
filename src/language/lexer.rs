@@ -30,7 +30,7 @@ impl<'a> Lexer<'a> {
         Ok(tokens)
     }
 
-    pub fn next_token(&mut self) -> Result<Vec<Token>, Diagnostic> {
+    pub fn next_token(&mut self) -> Result<Token, Diagnostic> {
         self.skip_whitespace_and_comments();
 
         if self.is_at_end() {
@@ -42,7 +42,7 @@ impl<'a> Lexer<'a> {
 
         let kind = match c {
             '0'..='9' => self.lex_number(start)?,
-            'a'..='z' | 'A'..='Z' | '_' => self.lex_ident_or_keyword(start)?,
+            'a'..='z' | 'A'..='Z' | '_' => self.lex_ident_or_keyword(start),
             '"' => self.lex_string(start)?,
             '+' => {
                 self.advance();
@@ -75,13 +75,12 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     TokenKind::EqEq
                 } else {
-                    self.advance();
                     TokenKind::Eq
                 }
             }
             '!' => {
                 self.advance();
-                if current_char() == '=' {
+                if self.current_char() == '=' {
                     self.advance();
                     TokenKind::BangEq
                 } else {
@@ -109,7 +108,7 @@ impl<'a> Lexer<'a> {
             '&' if self.peak() == '&' => {
                 self.advance();
                 self.advance();
-                TokenKind::AmpAmps
+                TokenKind::AmpAmp
             }
             '|' if self.peak() == '|' => {
                 self.advance();
@@ -249,7 +248,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn advance(&mut self) {
-        if let Some(c) = self.source.content[&self.pos..].chars().next() {
+        if let Some(c) = self.source.content[self.pos..].chars().next() {
             self.pos += c.len_utf8();
         }
     }

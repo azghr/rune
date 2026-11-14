@@ -10,7 +10,7 @@ use crate::shared::source::SourceFile;
 pub struct Compiler;
 
 impl Compiler {
-    pub fn compile(source_name: &str, source_text: &str) -> Result<String, ()> {
+    pub fn compile(source_name: &str, source_text: &str) -> Result<String, String> {
         let source = SourceFile::new(source_name, source_text);
         let reporter = Reporter::new(&source);
 
@@ -19,7 +19,7 @@ impl Compiler {
             Ok(t) => t,
             Err(e) => {
                 reporter.report(&e);
-                return Err(());
+                return Err("compilation failed".to_string());
             }
         };
 
@@ -28,7 +28,7 @@ impl Compiler {
             Ok(p) => p,
             Err(e) => {
                 reporter.report(&e);
-                return Err(());
+                return Err("compilation failed".to_string());
             }
         };
 
@@ -37,7 +37,7 @@ impl Compiler {
             Ok(p) => p,
             Err(errors) => {
                 reporter.report_all(&errors);
-                return Err(());
+                return Err("compilation failed".to_string());
             }
         };
 

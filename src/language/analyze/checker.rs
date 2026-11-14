@@ -12,6 +12,12 @@ pub struct Analyzer {
     errors: Vec<Diagnostic>,
 }
 
+impl Default for Analyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Analyzer {
     pub fn new() -> Self {
         Self {
@@ -94,19 +100,24 @@ impl Analyzer {
                 }
             }
             Stmt::Assign { name, value, span } => {
-                let sym = self.scopes.resolve(name);
-                if let Some(sym) = sym {
-                    let value_ty = self.analyze_expr(value);
-                    if sym.ty != value_ty {
-                        self.error(
-                            format!(
-                                "cannot assign `{}` to variable of type `{}`",
-                                type_name(&value_ty),
-                                type_name(&sym.ty)
-                            ),
-                            *span,
-                        );
+                let sym_ty = match self.scopes.resolve(name) {
+                    Some(sym) => sym.ty.clone(),
+                    None => {
+                        self.error(format!("undefined variable `{}`", name), *span);
+                        return;
                     }
+                };
+
+                let value_ty = self.analyze_expr(value);
+                if sym_ty != value_ty {
+                    self.error(
+                        format!(
+                            "cannot assign `{}` to variable of type `{}`",
+                            type_name(&value_ty),
+                            type_name(&sym_ty)
+                        ),
+                        *span,
+                    );
                 }
             }
             Stmt::Expr(expr) => {
@@ -117,17 +128,17 @@ impl Analyzer {
                     .as_ref()
                     .map(|e| self.analyze_expr(e))
                     .unwrap_or(Type::Void);
-                if let Some(expected) = &self.current_return_type {
-                    if *expected != ret_ty {
-                        self.error(
-                            format!(
-                                "return type mismatch: expected `{}`, found `{}`",
-                                type_name(expected),
-                                type_name(&ret_ty)
-                            ),
-                            *span,
-                        );
-                    }
+                if let Some(expected) = &self.current_return_type
+                    && *expected != ret_ty
+                {
+                    self.error(
+                        format!(
+                            "return type mismatch: expected `{}`, found `{}`",
+                            type_name(expected),
+                            type_name(&ret_ty)
+                        ),
+                        *span,
+                    );
                 }
             }
             Stmt::If {

@@ -48,6 +48,9 @@ fn main() {
                 }
             }
         }
-        Err(()) => process::exit(1),
+        Err(msg) => {
+            eprintln!("{msg}");
+            process::exit(1);
+        }
     }
 }

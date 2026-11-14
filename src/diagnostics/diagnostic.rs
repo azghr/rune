@@ -3,7 +3,7 @@
 use crate::shared::span::Span;
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Diagnostic {
     pub message: String,
     pub span: Span,
