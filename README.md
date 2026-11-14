@@ -7,7 +7,7 @@ A small, statically typed programming language written in Rust.
 [![CI](https://github.com/azghr/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/azghr/rune/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-in%20development-orange)]()
+[![Status](https://img.shields.io/badge/status-in%20development-orange)](<>)
 
 </div>
 
@@ -22,8 +22,10 @@ compiled with the system `gcc` and linked against a small C runtime.
 ## Features
 
 - Statically typed with `int`, `bool`, `string`, and `void`
-- C-family syntax: functions, `let` bindings, `if`/`else`, `while`, `return`
+- C-family syntax: functions, `let`/`let mut` bindings, `if`/`else if`/`else`,
+  `while`, `return`
 - Logical operators (`&&`, `||`) with correct precedence
+- Immutability by default: only `mut` variables can be reassigned
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
 - A simple three-address IR with constant folding and dead code elimination
@@ -61,20 +63,27 @@ cargo run --release -- examples/hello.rune
 ```rust
 fn main() {
     let x = 10
-    let y = 20
+    let mut y = 20
     let sum = x + y * 2
     print(sum)
 
     if sum > 40 {
         print(1)
+    } else if sum > 20 {
+        print(2)
     } else {
         print(0)
     }
+
+    y = y + 1
+    print(true)
+    print("done")
 }
 ```
 
-- `print(expr)` is the only builtin; it prints an integer followed by a newline
-  (via the C runtime).
+- `print(expr)` is the only builtin; it prints an integer, bool, or string
+  followed by a newline (via the C runtime).
+- Variables are immutable by default; declare them `let mut` to reassign.
 - Statements are newline/semicolon separated; semicolons are accepted.
 - All integers are 64-bit signed (`i64` / C `int64_t`).
 
@@ -106,7 +115,8 @@ More examples live in [`examples/`](examples).
 - [x] Type checker with lexical scopes
 - [x] Three-address IR with constant folding and dead code elimination
 - [x] C code generation with a small runtime
-- [x] Integration tests and a real test suite
+- [x] Integration tests and a real test suite (75 tests across lexer,
+      parser, checker, codegen, and end-to-end binaries)
 - [ ] Strings as a first-class value type
 - [ ] Functions as values / closures
 - [ ] LLVM or WASM backend

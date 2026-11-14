@@ -101,11 +101,15 @@ impl Analyzer {
         match stmt {
             Stmt::Let {
                 name,
+                mutable,
                 ty,
                 value,
                 span,
             } => {
                 let value_ty = self.analyze_expr(value);
+                if value_ty == Type::Void {
+                    self.error("cannot bind a `void` value to a variable", *span);
+                }
                 let final_ty = if let Some(declared) = ty {
                     if *declared != value_ty {
                         self.error(
@@ -126,27 +130,34 @@ impl Analyzer {
                     name: name.clone(),
                     ty: final_ty,
                     span: *span,
-                    mutable: true,
+                    mutable: *mutable,
                 }) {
                     self.error(msg, *span);
                 }
             }
             Stmt::Assign { name, value, span } => {
-                let sym_ty = match self.scopes.resolve(name) {
-                    Some(sym) => sym.ty.clone(),
+                let sym = match self.scopes.resolve(name) {
+                    Some(sym) => sym.clone(),
                     None => {
                         self.error(format!("undefined variable `{}`", name), *span);
                         return;
                     }
                 };
+                if !sym.mutable {
+                    self.error(
+                        format!("cannot assign to immutable variable `{}`", name),
+                        *span,
+                    );
+                    return;
+                }
 
                 let value_ty = self.analyze_expr(value);
-                if sym_ty != value_ty {
+                if sym.ty != value_ty {
                     self.error(
                         format!(
                             "cannot assign `{}` to variable of type `{}`",
                             type_name(&value_ty),
-                            type_name(&sym_ty)
+                            type_name(&sym.ty)
                         ),
                         *span,
                     );
@@ -237,7 +248,12 @@ impl Analyzer {
                         }
                     }
                     TokenKind::EqEq | TokenKind::BangEq => {
-                        if left_ty == right_ty {
+                        // Comparing strings with == in C compares pointers,
+                        // not contents, so reject it until proper support exists.
+                        if left_ty == Type::String || right_ty == Type::String {
+                            self.error("string comparison is not supported yet", *span);
+                            Type::Bool
+                        } else if left_ty == right_ty {
                             Type::Bool
                         } else {
                             self.error("operands must have the same type", *span);
@@ -287,7 +303,10 @@ impl Analyzer {
                         if args.len() != 1 {
                             self.error("print takes exactly one argument", *span);
                         } else {
-                            self.analyze_expr(&args[0]);
+                            let arg_ty = self.analyze_expr(&args[0]);
+                            if arg_ty == Type::Void {
+                                self.error("cannot print a `void` value", *span);
+                            }
                         }
                         Type::Void
                     }

@@ -71,7 +71,7 @@ fn while_loops_and_recursion_work_end_to_end() {
         }
 
         fn main() {
-            let i = 0
+            let mut i = 0
             while i < 10 {
                 print(fib(i))
                 i = i + 1
@@ -101,6 +101,43 @@ fn arithmetic_and_comparison_operators_evaluate_correctly() {
         }",
     );
     assert_eq!(out, "3\n1\n26\n9\n1\n2\n3\n");
+}
+
+#[test]
+fn else_if_chains_evaluate_correctly() {
+    let out = run_program(
+        "fn classify(n: int) -> int {
+            if n < 0 {
+                return -1
+            } else if n == 0 {
+                return 0
+            } else {
+                return 1
+            }
+        }
+
+        fn main() {
+            print(classify(-5))
+            print(classify(0))
+            print(classify(7))
+        }",
+    );
+    assert_eq!(out, "-1\n0\n1\n");
+}
+
+#[test]
+fn print_dispatches_bool_and_string_arguments() {
+    let out = run_program(
+        "fn main() {
+            let flag = true
+            let name = \"rune\"
+            print(flag)
+            print(false)
+            print(name)
+            print(42)
+        }",
+    );
+    assert_eq!(out, "true\nfalse\nrune\n42\n");
 }
 
 #[test]

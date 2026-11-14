@@ -49,6 +49,24 @@ fn maps_print_to_the_runtime_call() {
 }
 
 #[test]
+fn emits_typed_variable_declarations() {
+    let c = generate(
+        "fn main() { let i = 1 let mut b = true let s = \"hi\" print(i) print(b) print(s) }",
+    );
+    assert!(c.contains("int64_t i = 1;"));
+    assert!(c.contains("bool b = true;"));
+    assert!(c.contains("const char* s = \"hi\";"));
+}
+
+#[test]
+fn dispatches_print_by_argument_type() {
+    let c = generate("fn main() { print(1) print(true) print(\"hi\") }");
+    assert!(c.contains("rune_print_int(1)"));
+    assert!(c.contains("rune_print_bool(true)"));
+    assert!(c.contains("rune_print_string(\"hi\")"));
+}
+
+#[test]
 fn maps_arithmetic_operators_verbatim() {
     let c = generate("fn main() { let x = 1 + 2 - 3 * 4 / 5 % 6 print(x) }");
     for op in ["+", "-", "*", "/", "%"] {
@@ -67,7 +85,7 @@ fn maps_logical_operators_verbatim() {
 fn emits_if_else_and_while_as_c_control_flow() {
     let c = generate(
         "fn main() {
-            let i = 0
+            let mut i = 0
             while i < 3 {
                 if i == 1 { print(i) } else { print(0) }
                 i = i + 1

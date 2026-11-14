@@ -67,6 +67,7 @@ impl Parser {
 
     fn parse_let(&mut self) -> Result<Stmt, Diagnostic> {
         let start_span = self.previous().span;
+        let mutable = self.matches(&[TokenKind::Mut]);
         let name_tok = self.consume(TokenKind::Ident(String::new()), "expected variable name")?;
         let name = match &name_tok.kind {
             TokenKind::Ident(n) => n.clone(),
@@ -84,6 +85,7 @@ impl Parser {
 
         Ok(Stmt::Let {
             name,
+            mutable,
             ty,
             value,
             span: start_span.merge(self.previous().span),
@@ -97,8 +99,19 @@ impl Parser {
         let then_branch = self.parse_block_after_lbrace()?;
 
         let else_branch = if self.matches(&[TokenKind::Else]) {
-            self.consume(TokenKind::LBrace, "expected `{` after else")?;
-            Some(self.parse_block_after_lbrace()?)
+            // `else if` chains desugar into a block wrapping the inner if,
+            // so the AST only ever holds if/else over blocks.
+            if self.check(&TokenKind::If) {
+                self.advance(); // consume `if`; parse_if starts at the condition
+                let inner = self.parse_if()?;
+                Some(Block {
+                    statements: vec![inner],
+                    span: self.previous().span,
+                })
+            } else {
+                self.consume(TokenKind::LBrace, "expected `{` or `if` after else")?;
+                Some(self.parse_block_after_lbrace()?)
+            }
         } else {
             None
         };

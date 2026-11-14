@@ -36,6 +36,7 @@ pub struct Block {
 pub enum Stmt {
     Let {
         name: String,
+        mutable: bool,
         ty: Option<Type>,
         value: Expr,
         span: Span,

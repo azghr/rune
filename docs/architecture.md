@@ -66,9 +66,12 @@ a `Vec<Token>` — each token is a `TokenKind` plus its `Span`.
 
 A recursive-descent parser producing the AST defined in `src/language/ast.rs`.
 
-**Statements** (`stmt.rs`, `decl.rs`): function declarations, `let` bindings
-(with an optional `: type` annotation), assignments, `if`/`else`, `while`,
-`return`, blocks, and expression statements. Statements are terminated by an
+**Statements** (`stmt.rs`, `decl.rs`): function declarations, `let` and
+`let mut` bindings (with an optional `: type` annotation), assignments,
+`if`/`else` (including `else if` chains, which desugar into a block wrapping
+the inner if), `while`, `return`, blocks, and expression statements.
+A value-less `return` is recognized by the next token not being able to start
+an expression, so no semicolon is required before `}`. Statements are terminated by an
 optional semicolon — a line break alone is enough, since the lexer discards
 newlines.
 
@@ -96,11 +99,17 @@ The type checker walks the AST top-down.
   global scope holds function declarations; each block pushes and pops a
   scope, implementing lexical scoping.
 - **Checker** (`checker.rs`): every expression is annotated with a `Type`
-  (`int`, `bool`, `string`, `void` — see `types.rs`). The checker verifies:
+  (`int`, `bool`, `string`, `void` — see `types.rs`). Function signatures are
+  collected in a first pass, so recursion and calls before definition work.
+  The checker verifies:
   - variables are declared before use and assignments match the declared type
-  - `let` values match an explicit type annotation when one is given
-  - call arguments and return values match the function's signature
+  - only variables declared `let mut` may be reassigned
+  - `let` values match an explicit type annotation when one is given, and are
+    not `void`
+  - calls resolve to a declared function with matching argument count and
+    types; the return type flows into the surrounding expression
   - `if`/`while` conditions are `bool`
+  - `==`/`!=` are rejected on strings (C would compare pointers, not contents)
 - Errors are collected in a list and reported together when checking finishes.
 
 Note: the current checker resolves functions globally, so recursion (see
@@ -117,11 +126,13 @@ Note: the current checker resolves functions globally, so recursion (see
   is emitted, satisfying C's requirements regardless of the Rune signature.
 - Rune types map to C as: `int` → `int64_t`, `bool` → `bool`,
   `string` → `const char*`, `void`/missing → `void`.
+- While emitting, the generator maintains its own scope stack of variable
+  types plus a function return-type table, letting it infer the static type of
+  each expression. `let` declarations get the matching C type, and `print(x)`
+  dispatches to `rune_print_int` / `rune_print_bool` / `rune_print_string`
+  based on the argument's type.
 - Expressions become parenthesized C expressions; `if`/`while` become C
   control flow with generated blocks.
-- `print(x)` becomes a call to `rune_print_int` in the runtime. (The runtime
-  also provides `rune_print_bool` and `rune_print_string`, but the generator
-  does not dispatch on the argument type yet.)
 
 ## Runtime (`runtime/`)
 
@@ -161,10 +172,12 @@ second backend.
 
 ## Current Limitations
 
-- No first-class strings, arrays, or structs
+- No first-class strings, arrays, or structs (strings cannot be compared,
+  concatenated, or stored in containers)
 - No functions-as-values or closures
 - The IR passes are not connected to the pipeline (see above)
-- `print` always calls `rune_print_int`; bool and string arguments are not
-  dispatched yet
+- The generator re-infers expression types instead of the checker annotating
+  the AST — fine at this scale, but a types-on-AST refactor is the cleaner
+  long-term design
 
 See the [Roadmap](../README.md#roadmap) in the README for planned work.

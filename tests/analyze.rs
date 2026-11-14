@@ -42,7 +42,7 @@ fn errors_on_let_annotation_mismatch() {
 
 #[test]
 fn errors_on_assignment_type_mismatch() {
-    let errs = analyze_errors("fn main() { let x = 1 x = true }");
+    let errs = analyze_errors("fn main() { let mut x = 1 x = true }");
     assert!(
         errs.iter()
             .any(|e| e.message.contains("cannot assign `bool`"))
@@ -135,6 +135,34 @@ fn errors_on_print_arity() {
     assert!(
         errs.iter()
             .any(|e| e.message.contains("print takes exactly one argument"))
+    );
+}
+
+#[test]
+fn errors_on_string_equality() {
+    // `==` on strings would compile to a C pointer comparison, so it is rejected
+    let errs = analyze_errors("fn main() { let x = \"a\" == \"b\" print(x) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("string comparison is not supported"))
+    );
+}
+
+#[test]
+fn errors_on_binding_void_to_a_variable() {
+    let errs = analyze_errors("fn f() { print(1) } fn main() { let x = f() }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot bind a `void` value"))
+    );
+}
+
+#[test]
+fn errors_on_printing_void() {
+    let errs = analyze_errors("fn f() { print(1) } fn main() { print(f()) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot print a `void` value"))
     );
 }
 

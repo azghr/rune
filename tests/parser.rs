@@ -132,6 +132,22 @@ fn parses_if_without_else() {
 }
 
 #[test]
+fn parses_else_if_chains() {
+    let func = only_function(
+        "fn main() { if true { print(1) } else if false { print(2) } else { print(3) } }",
+    );
+    let Stmt::If { else_branch, .. } = &func.body.statements[0] else {
+        panic!("expected if");
+    };
+    // the else branch is a block holding exactly one nested if
+    assert_eq!(else_branch.as_ref().unwrap().statements.len(), 1);
+    assert!(matches!(
+        &else_branch.as_ref().unwrap().statements[0],
+        Stmt::If { .. }
+    ));
+}
+
+#[test]
 fn parses_while() {
     let func = only_function("fn main() { while true { print(1) } }");
     assert!(matches!(&func.body.statements[0], Stmt::While { .. }));

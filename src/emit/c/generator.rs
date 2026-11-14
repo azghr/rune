@@ -6,11 +6,17 @@
 
 use crate::language::ast::*;
 use crate::language::token::TokenKind;
+use std::collections::HashMap;
 use std::fmt::Write;
 
 pub struct CGenerator {
     output: String,
     indent: usize,
+    /// Return types of declared functions, used to type call expressions.
+    function_returns: HashMap<String, Type>,
+    /// Lexically scoped variable types, maintained while emitting so that
+    /// declarations and `print` calls pick the right C types.
+    scopes: Vec<HashMap<String, Type>>,
 }
 
 impl Default for CGenerator {
@@ -24,10 +30,18 @@ impl CGenerator {
         Self {
             output: String::new(),
             indent: 0,
+            function_returns: HashMap::new(),
+            scopes: Vec::new(),
         }
     }
 
     pub fn generate(mut self, program: &Program) -> String {
+        for func in &program.functions {
+            self.function_returns.insert(
+                func.name.clone(),
+                func.return_type.clone().unwrap_or(Type::Void),
+            );
+        }
         self.emit_headers();
         // Forward declarations so functions can call each other regardless
         // of the order they appear in the source.
@@ -71,13 +85,7 @@ impl CGenerator {
             if i > 0 {
                 sig.push_str(", ");
             }
-            let ty = match param.ty {
-                Type::Int => "int64_t",
-                Type::Bool => "bool",
-                Type::String => "const char*",
-                Type::Void => "void",
-            };
-            sig.push_str(&format!("{} {}", ty, param.name));
+            sig.push_str(&format!("{} {}", Self::c_type_name(&param.ty), param.name));
         }
 
         sig.push(')');
@@ -90,7 +98,12 @@ impl CGenerator {
         self.output.push_str(" {\n");
         self.indent += 1;
 
+        self.enter_scope();
+        for param in &func.params {
+            self.declare_var(&param.name, param.ty.clone());
+        }
         self.emit_block(&func.body);
+        self.exit_scope();
 
         self.indent -= 1;
         if func.name == "main" {
@@ -102,16 +115,86 @@ impl CGenerator {
     }
 
     fn emit_block(&mut self, block: &Block) {
+        self.enter_scope();
         for stmt in &block.statements {
             self.emit_stmt(stmt);
+        }
+        self.exit_scope();
+    }
+
+    fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn exit_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn declare_var(&mut self, name: &str, ty: Type) {
+        if let Some(top) = self.scopes.last_mut() {
+            top.insert(name.to_string(), ty);
+        }
+    }
+
+    fn var_type(&self, name: &str) -> Option<Type> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
+    }
+
+    /// Maps a Rune type to its C equivalent.
+    fn c_type_name(ty: &Type) -> &'static str {
+        match ty {
+            Type::Int => "int64_t",
+            Type::Bool => "bool",
+            Type::String => "const char*",
+            Type::Void => "void",
+        }
+    }
+
+    /// Infers the static type of an expression during emission. The checker
+    /// guarantees the program is well-typed, so the fallbacks here only guard
+    /// against internal mistakes.
+    fn infer_type(&self, expr: &Expr) -> Type {
+        match expr {
+            Expr::Int { .. } => Type::Int,
+            Expr::Bool { .. } => Type::Bool,
+            Expr::String { .. } => Type::String,
+            Expr::Variable { name, .. } => self.var_type(name).unwrap_or(Type::Int),
+            Expr::Grouping { expr, .. } => self.infer_type(expr),
+            Expr::Unary { op, .. } => match op {
+                TokenKind::Minus => Type::Int,
+                _ => Type::Bool,
+            },
+            Expr::Binary { op, .. } => match op {
+                TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Percent => Type::Int,
+                _ => Type::Bool,
+            },
+            Expr::Call { callee, .. } => {
+                if callee == "print" {
+                    Type::Void
+                } else {
+                    self.function_returns
+                        .get(callee)
+                        .cloned()
+                        .unwrap_or(Type::Int)
+                }
+            }
         }
     }
 
     fn emit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Let { name, value, .. } => {
+                let ty = self.infer_type(value);
+                self.declare_var(name, ty.clone());
                 self.indent_write();
-                write!(self.output, "int64_t {} = ", name).unwrap();
+                write!(self.output, "{} {} = ", Self::c_type_name(&ty), name).unwrap();
                 self.emit_expr(value);
                 self.output.push_str(";\n");
             }
@@ -208,8 +291,14 @@ impl CGenerator {
             }
             Expr::Call { callee, args, .. } => {
                 if callee == "print" {
-                    // Special handling for print
-                    self.output.push_str("rune_print_int(");
+                    // Dispatch on the argument's static type.
+                    let runtime_fn = match args.first().map(|a| self.infer_type(a)) {
+                        Some(Type::Bool) => "rune_print_bool",
+                        Some(Type::String) => "rune_print_string",
+                        _ => "rune_print_int",
+                    };
+                    self.output.push_str(runtime_fn);
+                    self.output.push('(');
                     if let Some(arg) = args.first() {
                         self.emit_expr(arg);
                     }
