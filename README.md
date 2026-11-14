@@ -30,7 +30,8 @@ and linked against a small C runtime.
 - String comparison with `==`/`!=` compares contents
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
-- Compiles through a typed three-address IR with constant folding and dead
+- Compiles through a typed three-address IR with constant folding (including
+  branch elimination), unreachable-block removal, and liveness-based dead
   code elimination
 - Short-circuit `&&`/`||` lowered to real control flow, not eager evaluation
 - Written in Rust with zero external dependencies

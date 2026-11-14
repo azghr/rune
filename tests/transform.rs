@@ -173,6 +173,87 @@ fn string_equality_lowering_keeps_eq_operators() {
 }
 
 #[test]
+fn constant_branches_are_folded_to_jumps() {
+    let module = lowered("fn main() { if true { print(1) } else { print(2) } }");
+    let body = &module.functions[0].body;
+    // entry jumps straight to the then block; the dead else block is gone
+    assert!(matches!(body[0].terminator, Terminator::Jump(1)));
+    assert!(
+        body.iter()
+            .all(|b| !matches!(b.terminator, Terminator::Branch { .. }))
+    );
+    assert_eq!(body.len(), 3, "dead else block should be removed: {body:?}");
+}
+
+#[test]
+fn constant_variables_fold_branches_via_terminator_propagation() {
+    let module = lowered("fn main() { let flag = true if flag { print(1) } else { print(2) } }");
+    let body = &module.functions[0].body;
+    assert!(
+        body.iter()
+            .all(|b| !matches!(b.terminator, Terminator::Branch { .. }))
+    );
+}
+
+#[test]
+fn while_false_removes_the_loop_body() {
+    let module = lowered("fn main() { while false { print(1) } print(2) }");
+    let body = &module.functions[0].body;
+    // entry jumps to cond, cond jumps to exit, body removed
+    assert!(!body.iter().any(|b| b.instructions.iter().any(
+        |i| matches!(i, Instruction::Call { name, .. } if name == "print" && {
+            if let Instruction::Call { args, .. } = i {
+                matches!(args.first(), Some(Value::ConstInt(1)))
+            } else {
+                false
+            }
+        })
+    )));
+    assert!(
+        body.iter()
+            .all(|b| !matches!(b.terminator, Terminator::Branch { .. }))
+    );
+}
+
+#[test]
+fn real_branches_survive_branch_folding() {
+    // both sides depend on runtime data, so nothing may be folded
+    let module = lowered(include_str!("../examples/fib.rune"));
+    assert!(
+        module
+            .functions
+            .iter()
+            .flat_map(|f| f.body.iter())
+            .any(|b| matches!(b.terminator, Terminator::Branch { .. }))
+    );
+}
+
+#[test]
+fn dead_stores_overwritten_before_read_are_removed() {
+    let module = lowered("fn main() { let mut x = 1 x = 2 print(x) }");
+    let main = &module.functions[0];
+    assert!(!main.body[0].instructions.iter().any(
+        |i| matches!(i, Instruction::Move { dest, value: Value::ConstInt(1), .. } if dest == "x")
+    ));
+    // the live store stays
+    assert!(main.body[0].instructions.iter().any(
+        |i| matches!(i, Instruction::Move { dest, value: Value::ConstInt(2), .. } if dest == "x")
+    ));
+}
+
+#[test]
+fn unused_temp_chains_are_fully_removed_by_liveness() {
+    let module = lowered("fn main() { let dead = 1 + 2 print(3) }");
+    let main = &module.functions[0];
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .all(|i| !matches!(i, Instruction::Binary { dest, .. } if dest == "dead"))
+    );
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

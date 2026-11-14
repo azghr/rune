@@ -4,8 +4,10 @@
 //!
 //! Evaluates constant expressions at compile time and replaces them with
 //! their computed values. Within each block, constants assigned to temps are
-//! also propagated into later instructions, so `2 * 3 + 4` folds all the way
-//! down to `10`.
+//! propagated into later instructions, so `2 * 3 + 4` folds all the way down
+//! to `10`. Branch terminators whose condition became a constant are turned
+//! into unconditional jumps, and blocks that became unreachable as a result
+//! are removed.
 
 use crate::transform::ir::*;
 use std::collections::HashMap;
@@ -18,6 +20,8 @@ impl ConstFold {
             for block in &mut func.body {
                 Self::fold_block(block);
             }
+            Self::fold_constant_branches(func);
+            Self::remove_unreachable_blocks(func);
         }
     }
 
@@ -94,6 +98,100 @@ impl ConstFold {
                 Instruction::Call { .. } => {}
             }
         }
+
+        // The branch condition may have become a constant through propagation.
+        if let Terminator::Branch { condition, .. } = &mut block.terminator
+            && let Value::Local(name) = condition
+            && let Some(v) = constants.get(name)
+        {
+            *condition = v.clone();
+        }
+    }
+
+    /// Replaces `Branch` terminators with constant conditions by
+    /// unconditional jumps to the taken side.
+    fn fold_constant_branches(func: &mut Function) {
+        for block in &mut func.body {
+            if let Terminator::Branch {
+                condition: Value::ConstBool(true),
+                then_block,
+                ..
+            } = block.terminator
+            {
+                block.terminator = Terminator::Jump(then_block);
+            } else if let Terminator::Branch {
+                condition: Value::ConstBool(false),
+                else_block,
+                ..
+            } = block.terminator
+            {
+                block.terminator = Terminator::Jump(else_block);
+            }
+        }
+    }
+
+    /// Drops blocks that can no longer be reached from the entry block, and
+    /// renumbers the remaining ones consecutively.
+    fn remove_unreachable_blocks(func: &mut Function) {
+        if func.body.is_empty() {
+            return;
+        }
+
+        // Mark reachable blocks by walking the control-flow graph.
+        let mut reachable = vec![false; func.body.len()];
+        let mut stack = vec![0usize];
+        reachable[0] = true;
+        while let Some(id) = stack.pop() {
+            match &func.body[id].terminator {
+                Terminator::Return(_) => {}
+                Terminator::Jump(target) => {
+                    if !reachable[*target] {
+                        reachable[*target] = true;
+                        stack.push(*target);
+                    }
+                }
+                Terminator::Branch {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    for target in [then_block, else_block] {
+                        if !reachable[*target] {
+                            reachable[*target] = true;
+                            stack.push(*target);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Renumber reachable blocks in their original order.
+        let mut remap: HashMap<usize, usize> = HashMap::new();
+        let mut kept = Vec::new();
+        for (id, mut block) in func.body.drain(..).enumerate() {
+            if reachable[id] {
+                remap.insert(id, kept.len());
+                block.id = kept.len();
+                kept.push(block);
+            }
+        }
+
+        for block in &mut kept {
+            match &mut block.terminator {
+                Terminator::Jump(target) => *target = remap[target],
+                Terminator::Branch {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    *then_block = remap[&*then_block];
+                    *else_block = remap[&*else_block];
+                }
+                Terminator::Return(_) => {}
+            }
+        }
+
+        func.body = kept;
     }
 
     /// Replaces a local operand with its known constant, if any.

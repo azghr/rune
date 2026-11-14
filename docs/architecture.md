@@ -32,7 +32,8 @@ the first stage that fails.
 There is also a second C emitter that goes straight from the AST
 (`src/emit/c/generator.rs`); the driver no longer uses it, but it remains as
 a reference and is exercised by the test suite. `cargo run --bin irdebug --
-file.rune` dumps the lowered IR blocks for inspection.
+[--passes|--fold|--dce] file.rune` dumps the IR (optionally after the
+passes) for inspection.
 
 ## Shared Infrastructure
 
@@ -149,13 +150,15 @@ them.
 Two passes run over the IR before emission:
 
 - `ConstFold` — folds constant arithmetic (with wrapping semantics and
-  division-by-zero left unevaluated) and **propagates constants within a
-  block**, so `2 * 3 + 4` folds all the way to `10`.
-- `DeadCodeElim` — removes assignments whose results are never used anywhere
-  in the function, keeping all calls (they may have side effects). The used
-  set is function-global rather than a precise per-block liveness analysis —
-  conservative by design, so loop counters assigned in one block and read in
-  another are never wrongly removed.
+  division-by-zero left unevaluated), propagates constants within a block
+  (so `2 * 3 + 4` folds all the way to `10`), folds branches whose condition
+  became a constant into unconditional jumps, and removes blocks that became
+  unreachable, renumbering the rest.
+- `DeadCodeElim` — backward **liveness analysis** over the whole CFG (a
+  standard fixpoint): an assignment is removed when its destination is not
+  read afterwards on any path, so dead stores — including values overwritten
+  before ever being read — disappear, while loop-carried and cross-block
+  values are preserved. Calls are always kept (they may have side effects).
 
 ## Stage 6: C Generation (`src/emit/c/`)
 
