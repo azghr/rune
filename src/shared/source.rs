@@ -3,7 +3,7 @@
 //! Holds the raw source text and provides helpers for turning byte offsets
 //! into human-readable line/column information.
 
-use crete::shared::span::Span;
+use crate::shared::span::Span;
 
 #[derive(Debug, Clone)]
 pub struct SourceFile {

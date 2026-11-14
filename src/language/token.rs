@@ -56,13 +56,13 @@ pub enum TokenKind {
 }
 
 #[derive(Debug, Clone)]
-struct Token {
+pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
 }
 
 impl Token {
     pub fn new(kind: TokenKind, span: Span) -> Self {
-        Slef { kind, span }
+        Self { kind, span }
     }
 }
