@@ -119,7 +119,7 @@ The type checker walks the AST top-down.
   - calls resolve to a declared function with matching argument count and
     types; the return type flows into the surrounding expression
   - `if`/`while` conditions are `bool`
-  - `==`/`!=` are rejected on strings (C would compare pointers, not contents)
+  - `==`/`!=` accept same-type operands, including strings
 - Errors are collected in a list and reported together when checking finishes.
 
 Note: the current checker resolves functions globally, so recursion (see
@@ -165,8 +165,10 @@ Two emitters exist:
 label; `Branch` becomes `if (cond) goto L_then;` / `goto L_else;`. All locals
 and temps are declared at the top of the function with their C types, and
 `print` dispatches to the right runtime function using the locals' recorded
-types. The output is less readable than the AST emitter's, but it reflects
-exactly what the transform passes produced.
+types, and string `==`/`!=` become `strcmp` comparisons (a raw C `==` on
+`const char*` would compare pointers, not contents). The output is less
+readable than the AST emitter's, but it reflects exactly what the transform
+passes produced.
 
 **`generator.rs` — AST to C (reference).** The original direct emitter,
 described below.
@@ -220,8 +222,8 @@ emitters read the same `Module` the C emitter does.
 
 ## Current Limitations
 
-- No first-class strings, arrays, or structs (strings cannot be compared,
-  concatenated, or stored in containers)
+- No first-class strings, arrays, or structs (strings can be compared but
+  not concatenated or stored in containers)
 - No functions-as-values or closures
 - `DeadCodeElim` uses a function-global used-set, so dead stores whose
   variables are read _somewhere_ are kept; a precise liveness analysis would

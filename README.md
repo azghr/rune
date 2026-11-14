@@ -27,6 +27,7 @@ and linked against a small C runtime.
   `while`, `return`
 - Logical operators (`&&`, `||`) with correct precedence
 - Immutability by default: only `mut` variables can be reassigned
+- String comparison with `==`/`!=` compares contents
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
 - Compiles through a typed three-address IR with constant folding and dead

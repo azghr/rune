@@ -161,6 +161,18 @@ fn temp_names_never_collide_with_user_variables() {
 }
 
 #[test]
+fn string_equality_lowering_keeps_eq_operators() {
+    let module = lowered("fn main() { let x = \"a\" == \"b\" print(x) }");
+    let main = &module.functions[0];
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Binary { op: BinOp::Eq, .. }))
+    );
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

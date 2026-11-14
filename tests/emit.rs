@@ -82,6 +82,13 @@ fn maps_logical_operators_verbatim() {
 }
 
 #[test]
+fn string_equality_is_emitted_as_strcmp() {
+    let c = generate("fn main() { let a = \"x\" print(a == \"y\") print(a != \"x\") }");
+    assert!(c.contains("strcmp(a, \"y\") == 0"));
+    assert!(c.contains("strcmp(a, \"x\") != 0"));
+}
+
+#[test]
 fn emits_if_else_and_while_as_c_control_flow() {
     let c = generate(
         "fn main() {

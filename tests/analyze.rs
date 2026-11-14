@@ -139,12 +139,17 @@ fn errors_on_print_arity() {
 }
 
 #[test]
-fn errors_on_string_equality() {
-    // `==` on strings would compile to a C pointer comparison, so it is rejected
-    let errs = analyze_errors("fn main() { let x = \"a\" == \"b\" print(x) }");
+fn string_equality_compares_contents() {
+    // accepted by the checker; both C emitters compile it to strcmp
+    analyze("fn main() { let x = \"a\" == \"b\" print(x) }");
+}
+
+#[test]
+fn errors_on_string_compared_to_int() {
+    let errs = analyze_errors("fn main() { let x = \"a\" == 1 }");
     assert!(
         errs.iter()
-            .any(|e| e.message.contains("string comparison is not supported"))
+            .any(|e| e.message.contains("operands must have the same type"))
     );
 }
 

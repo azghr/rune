@@ -17,6 +17,7 @@ pub fn generate(module: &Module) -> String {
     out.push_str("#include <stdio.h>\n");
     out.push_str("#include <stdint.h>\n");
     out.push_str("#include <stdbool.h>\n");
+    out.push_str("#include <string.h>\n");
     out.push_str("#include \"runtime/rune_rt.h\"\n\n");
 
     // Forward declarations so definition order never matters.
@@ -157,9 +158,26 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             ..
         } => {
             let _ = write!(out, "{} = ", dest);
-            emit_value(out, left);
-            let _ = write!(out, " {} ", op_to_c(op));
-            emit_value(out, right);
+            // String equality compares contents via strcmp; == on the C
+            // side would compare pointers.
+            if matches!(op, BinOp::Eq | BinOp::NotEq)
+                && (value_type(left, types) == Type::String
+                    || value_type(right, types) == Type::String)
+            {
+                let cmp = match op {
+                    BinOp::Eq => "== 0",
+                    _ => "!= 0",
+                };
+                out.push_str("strcmp(");
+                emit_value(out, left);
+                out.push_str(", ");
+                emit_value(out, right);
+                let _ = write!(out, ") {}", cmp);
+            } else {
+                emit_value(out, left);
+                let _ = write!(out, " {} ", op_to_c(op));
+                emit_value(out, right);
+            }
             out.push_str(";\n");
         }
         Instruction::Unary {

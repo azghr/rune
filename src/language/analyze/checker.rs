@@ -248,12 +248,9 @@ impl Analyzer {
                         }
                     }
                     TokenKind::EqEq | TokenKind::BangEq => {
-                        // Comparing strings with == in C compares pointers,
-                        // not contents, so reject it until proper support exists.
-                        if left_ty == Type::String || right_ty == Type::String {
-                            self.error("string comparison is not supported yet", *span);
-                            Type::Bool
-                        } else if left_ty == right_ty {
+                        // String comparison is compiled to strcmp by the
+                        // emitters, so same-type operands are fine here.
+                        if left_ty == right_ty {
                             Type::Bool
                         } else {
                             self.error("operands must have the same type", *span);

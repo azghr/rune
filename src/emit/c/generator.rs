@@ -277,6 +277,24 @@ impl CGenerator {
             Expr::Binary {
                 left, op, right, ..
             } => {
+                // String equality compares contents via strcmp; == on the C
+                // side would compare pointers.
+                if matches!(op, TokenKind::EqEq | TokenKind::BangEq)
+                    && (self.infer_type(left) == Type::String
+                        || self.infer_type(right) == Type::String)
+                {
+                    let cmp = match op {
+                        TokenKind::EqEq => "== 0",
+                        _ => "!= 0",
+                    };
+                    self.output.push_str("(strcmp(");
+                    self.emit_expr(left);
+                    self.output.push_str(", ");
+                    self.emit_expr(right);
+                    write!(self.output, ") {})", cmp).unwrap();
+                    return;
+                }
+
                 self.output.push('(');
                 self.emit_expr(left);
                 self.output.push(' ');

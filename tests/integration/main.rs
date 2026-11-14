@@ -126,6 +126,23 @@ fn else_if_chains_evaluate_correctly() {
 }
 
 #[test]
+fn string_comparison_compares_contents() {
+    let out = run_program(
+        "fn main() {
+            let a = \"hello\"
+            let b = \"world\"
+            print(a == \"hello\")
+            print(a == b)
+            print(a != b)
+            if \"x\" != \"y\" {
+                print(1)
+            }
+        }",
+    );
+    assert_eq!(out, "true\nfalse\ntrue\n1\n");
+}
+
+#[test]
 fn print_dispatches_bool_and_string_arguments() {
     let out = run_program(
         "fn main() {
