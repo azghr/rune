@@ -3,11 +3,12 @@
 //! High-level compilation pipeline.
 
 use crate::diagnostics::reporter::Reporter;
-use crate::emit::c::CGenerator;
+use crate::emit::c::ir;
 use crate::language::analyze::Analyzer;
 use crate::language::lexer::Lexer;
 use crate::language::parser::Parser;
 use crate::shared::source::SourceFile;
+use crate::transform::{ConstFold, DeadCodeElim, lower_program};
 
 pub struct Compiler;
 
@@ -43,8 +44,13 @@ impl Compiler {
             }
         };
 
-        // 4. Emit C
-        let c_code = CGenerator::new().generate(&program);
+        // 4. Lower to IR and run the transform passes
+        let mut module = lower_program(&program);
+        ConstFold::run(&mut module);
+        DeadCodeElim::run(&mut module);
+
+        // 5. Emit C
+        let c_code = ir::generate(&module);
         Ok(c_code)
     }
 }

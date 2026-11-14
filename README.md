@@ -11,9 +11,10 @@ A small, statically typed programming language written in Rust.
 
 </div>
 
-Rune uses a classic compiler pipeline — lexing, parsing, semantic analysis, IR
-transformation, and code generation. The compiler currently emits C, which is
-compiled with the system `gcc` and linked against a small C runtime.
+Rune uses a classic compiler pipeline — lexing, parsing, semantic analysis,
+lowering to a three-address IR, transformation passes, and code generation.
+The compiler emits C (via the IR), which is compiled with the system `gcc`
+and linked against a small C runtime.
 
 > **Status: early development.** The pipeline is scaffolded end to end and the
 > language is usable for small programs, but Rune is still missing many
@@ -28,7 +29,9 @@ compiled with the system `gcc` and linked against a small C runtime.
 - Immutability by default: only `mut` variables can be reassigned
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
-- A simple three-address IR with constant folding and dead code elimination
+- Compiles through a typed three-address IR with constant folding and dead
+  code elimination
+- Short-circuit `&&`/`||` lowered to real control flow, not eager evaluation
 - Written in Rust with zero external dependencies
 
 ## Getting Started
@@ -95,8 +98,8 @@ More examples live in [`examples/`](examples).
 ├── src/
 │   ├── language/      # lexer, parser, AST, type checker, scopes
 │   ├── diagnostics/   # diagnostics and source-context reporting
-│   ├── transform/     # three-address IR and optimization passes
-│   ├── emit/          # C code generation (LLVM/WASM are future targets)
+│   ├── transform/     # AST-to-IR lowering, three-address IR, passes
+│   ├── emit/          # C emitters (from AST and from IR; LLVM/WASM are future targets)
 │   ├── driver/        # high-level compile pipeline
 │   └── shared/        # source files and spans
 ├── runtime/           # small C runtime linked into every binary

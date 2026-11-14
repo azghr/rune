@@ -9,20 +9,30 @@ of a classic compiler pipeline.
  source.rune
      │
      ▼
- ┌───────┐   ┌────────┐   ┌──────────┐   ┌────────────┐
- │ Lexer │──▶│ Parser │──▶│ Analyzer │──▶│ C Generator │──▶ output.c
- └───────┘   └────────┘   └──────────┘   └────────────┘
+ ┌───────┐   ┌────────┐   ┌──────────┐   ┌──────────┐
+ │ Lexer │──▶│ Parser │──▶│ Analyzer │──▶│  Lowerer │──▶ IR module
+ └───────┘   └────────┘   └──────────┘   └──────────┘
+                                                    │
+                                       ConstFold + DeadCodeElim
                                                     │
                                                     ▼
-                                                 gcc + runtime/rune_rt.c
-                                                    │
-                                                    ▼
-                                                  ./output
+                                              IR → C emitter ──▶ output.c
+                                                                    │
+                                                                    ▼
+                                                        gcc + runtime/rune_rt.c
+                                                                    │
+                                                                    ▼
+                                                                 ./output
 ```
 
 The driver (src/driver) ties these stages together: `Compiler::compile` takes
 source text and runs each stage in order, reporting diagnostics and stopping at
 the first stage that fails.
+
+There is also a second C emitter that goes straight from the AST
+(`src/emit/c/generator.rs`); the driver no longer uses it, but it remains as
+a reference and is exercised by the test suite. `cargo run --bin irdebug --
+file.rune` dumps the lowered IR blocks for inspection.
 
 ## Shared Infrastructure
 
@@ -78,15 +88,15 @@ newlines.
 **Expressions** (`expr.rs`) use one function per precedence level, from
 loosest to tightest:
 
-| Level        | Operators      |
-|--------------|----------------|
-| logical      | `\|\|`, `&&`   |
-| equality     | `==`, `!=`     |
-| comparison   | `<`, `<=`, `>`, `>=` |
-| term         | `+`, `-`       |
-| factor       | `*`, `/`, `%`  |
-| unary        | `-`, `!`       |
-| primary      | literals, names, calls, `print`, parenthesized expressions |
+| Level      | Operators                                                  |
+| ---------- | ---------------------------------------------------------- |
+| logical    | `\|\|`, `&&`                                               |
+| equality   | `==`, `!=`                                                 |
+| comparison | `<`, `<=`, `>`, `>=`                                       |
+| term       | `+`, `-`                                                   |
+| factor     | `*`, `/`, `%`                                              |
+| unary      | `-`, `!`                                                   |
+| primary    | literals, names, calls, `print`, parenthesized expressions |
 
 All levels build left-associative `Expr::Binary` nodes. Calls and the `print`
 builtin share the `parse_call_args` helper.
@@ -115,13 +125,57 @@ The type checker walks the AST top-down.
 Note: the current checker resolves functions globally, so recursion (see
 `examples/fib.rune`) and forward references work.
 
-## Stage 4: C Generation (`src/emit/c/generator.rs`)
+## Stage 4: Lowering (`src/transform/lower.rs`)
+
+The checked AST is lowered into the three-address IR described in
+[`The IR and Passes`](#the-ir-and-passes-srctransform) — that section's
+caveat about the passes not being wired in is now historical; the driver runs
+them.
+
+- Expressions become instruction chains: each binary/unary operation writes
+  its result to a generated temp (`t0`, `t1`, …). Temp names are chosen to
+  never collide with user variables.
+- `if` becomes a `Branch` to then/else blocks that jump to a shared merge
+  block; `while` becomes a condition block whose body jumps back to it.
+- `&&` and `||` lower to **short-circuit control flow**: the right operand is
+  evaluated in its own block, reached only if the left operand allows it, so
+  side effects behave exactly as they would in C.
+- Every function's fall-through end gets an implicit `Return(None)`.
+- A `type` environment is rebuilt during lowering (parameters, `let` bindings,
+  block scoping) so each instruction carries the type its C emission needs.
+
+## Stage 5: Passes (`src/transform/passes/`)
+
+Two passes run over the IR before emission:
+
+- `ConstFold` — folds constant arithmetic (with wrapping semantics and
+  division-by-zero left unevaluated) and **propagates constants within a
+  block**, so `2 * 3 + 4` folds all the way to `10`.
+- `DeadCodeElim` — removes assignments whose results are never used anywhere
+  in the function, keeping all calls (they may have side effects). The used
+  set is function-global rather than a precise per-block liveness analysis —
+  conservative by design, so loop counters assigned in one block and read in
+  another are never wrongly removed.
+
+## Stage 6: C Generation (`src/emit/c/`)
+
+Two emitters exist:
+
+**`ir.rs` — IR to C (used by the driver).** Each basic block becomes a `goto`
+label; `Branch` becomes `if (cond) goto L_then;` / `goto L_else;`. All locals
+and temps are declared at the top of the function with their C types, and
+`print` dispatches to the right runtime function using the locals' recorded
+types. The output is less readable than the AST emitter's, but it reflects
+exactly what the transform passes produced.
+
+**`generator.rs` — AST to C (reference).** The original direct emitter,
+described below.
 
 `CGenerator` walks the checked AST and writes C99 to an in-memory string.
 
-- Functions get a `signature()` helper producing `ret name(params)`; all
-  signatures are also emitted as **forward declarations** at the top of the
-  file, so definition order never matters.
+- Functions get a `signature()` helper producing `ret name(params)`; both
+  emitters also emit all signatures as **forward declarations** at the top of
+  the file, so definition order never matters.
 - `main` is special-cased: its return type becomes C `int` and a `return 0;`
   is emitted, satisfying C's requirements regardless of the Rune signature.
 - Rune types map to C as: `int` → `int64_t`, `bool` → `bool`,
@@ -143,22 +197,16 @@ built program. Today they only implement printing; the CLI compiles with:
 gcc output.c runtime/rune_rt.c -o output -I.
 ```
 
-## The IR and Passes (`src/transform/`) — not yet wired in
+## The IR (`src/transform/ir.rs`)
 
 `src/transform/ir.rs` defines a small three-address IR: a `Module` of
 `Function`s, each a list of `BasicBlock`s ending in a `Terminator`
 (`Return`, `Jump`, or `Branch`). Instructions are `Binary`, `Unary`, `Move`,
-and `Call` over `Value`s (constants or locals).
+and `Call` over `Value`s (constants or locals), and every instruction records
+its result type.
 
-Two example passes exist against this IR:
-
-- `ConstFold` — folds constant binary operations at compile time
-- `DeadCodeElim` — removes assignments whose results are never used
-
-These are **not part of the compile pipeline yet**: the driver goes straight
-from the checked AST to C. Lowering the AST to this IR and running the passes
-before emission is the planned next step, and is the natural seam for adding a
-second backend.
+This IR is the natural seam for adding a second backend (LLVM, WASM): new
+emitters read the same `Module` the C emitter does.
 
 ## Design Decisions
 
@@ -175,9 +223,15 @@ second backend.
 - No first-class strings, arrays, or structs (strings cannot be compared,
   concatenated, or stored in containers)
 - No functions-as-values or closures
-- The IR passes are not connected to the pipeline (see above)
-- The generator re-infers expression types instead of the checker annotating
-  the AST — fine at this scale, but a types-on-AST refactor is the cleaner
-  long-term design
+- `DeadCodeElim` uses a function-global used-set, so dead stores whose
+  variables are read _somewhere_ are kept; a precise liveness analysis would
+  remove more
+- `ConstFold` propagation is per-block, so constants never cross block
+  boundaries
+- IR-based `output.c` uses `goto` labels rather than structured `if`/`while`
+  (see `generator.rs` for the readable direct-AST alternative)
+- Both C emitters re-derive expression types during their walks instead of
+  the checker annotating the AST — fine at this scale, but a types-on-AST
+  refactor is the cleaner long-term design
 
 See the [Roadmap](../README.md#roadmap) in the README for planned work.
