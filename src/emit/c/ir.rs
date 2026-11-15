@@ -244,12 +244,29 @@ fn emit_value(out: &mut String, value: &Value) {
             let _ = write!(out, "{}", v);
         }
         Value::ConstString(s) => {
-            let _ = write!(out, "\"{}\"", s);
+            let _ = write!(out, "\"{}\"", escape_c_string(s));
         }
         Value::Local(name) => {
             let _ = write!(out, "{}", name);
         }
     }
+}
+
+/// Re-escapes a Rune string value as a C string literal. The lexer decoded
+/// escape sequences (\n, \t, \\", \\\\) into raw characters, so they must be
+/// restored before emitting C.
+fn escape_c_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn op_to_c(op: &BinOp) -> &'static str {

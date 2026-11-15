@@ -58,6 +58,8 @@ when it is tagged.
 
 - Constant propagation no longer keeps a stale constant across a
   non-constant reassignment (`x = f()` now correctly invalidates `x`)
+- String escapes (`\n`, `\t`, `\"`, `\\`) are re-encoded when emitting C;
+  previously a string containing an escaped quote produced invalid C
 
 ### Known limitations
 

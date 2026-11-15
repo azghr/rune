@@ -117,6 +117,8 @@ More examples live in [`examples/`](examples).
 
 ## Documentation
 
+- [Language reference](docs/language.md) — the Rune language: syntax, types,
+  operators, and control flow
 - [Architecture](docs/architecture.md) — how the compiler pipeline fits together
 
 ## Roadmap

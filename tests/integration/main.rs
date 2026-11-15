@@ -303,6 +303,22 @@ fn reassigning_from_a_call_beats_constant_propagation() {
 }
 
 #[test]
+fn string_escapes_round_trip_through_generated_c() {
+    // the lexer decodes escapes; the emitters must re-encode them or the
+    // generated C is not even valid
+    let out = run_program(
+        "fn main() {
+            print(\"a\\tb\")
+            print(\"q\\\"q\")
+            print(\"back\\\\slash\")
+            let s = \"line1\\nline2\"
+            print(s == \"line1\\nline2\")
+        }",
+    );
+    assert_eq!(out, "a\tb\nq\"q\nback\\slash\ntrue\n");
+}
+
+#[test]
 fn lex_errors_stop_the_pipeline() {
     let err = Compiler::compile("test.rune", "fn main() { let x = @ }")
         .expect_err("unexpected character should fail");

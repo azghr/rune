@@ -368,7 +368,9 @@ impl CGenerator {
         match expr {
             Expr::Int { value, .. } => write!(self.output, "{}", value).unwrap(),
             Expr::Bool { value, .. } => self.output.push_str(if *value { "true" } else { "false" }),
-            Expr::String { value, .. } => write!(self.output, "\"{}\"", value).unwrap(),
+            Expr::String { value, .. } => {
+                write!(self.output, "\"{}\"", Self::escape_c_string(value)).unwrap()
+            }
             Expr::Variable { name, .. } => self.output.push_str(name),
             Expr::Binary {
                 left, op, right, ..
@@ -459,6 +461,22 @@ impl CGenerator {
         for _ in 0..self.indent {
             self.output.push_str("    ");
         }
+    }
+
+    /// Re-escapes a Rune string value as a C string literal (the lexer
+    /// decoded escape sequences into raw characters).
+    fn escape_c_string(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                other => out.push(other),
+            }
+        }
+        out
     }
 
     fn op_to_c(op: &TokenKind) -> &'static str {
