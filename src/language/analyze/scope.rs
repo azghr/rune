@@ -70,12 +70,24 @@ impl ScopeStack {
         self.scopes.push(Scope::new());
     }
 
+    /// Number of scopes on the stack (used to snapshot lambda entry).
+    pub fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+
     pub fn pop(&mut self) {
         self.scopes.pop();
     }
 
     pub fn define(&mut self, symbol: Symbol) -> Result<(), String> {
         self.scopes.last_mut().expect("no scope").define(symbol)
+    }
+
+    /// The scope-stack index where `name` is defined, if anywhere.
+    pub fn depth_of(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.get(name).is_some())
     }
 
     pub fn resolve(&self, name: &str) -> Option<&Symbol> {

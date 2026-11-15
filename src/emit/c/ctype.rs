@@ -18,49 +18,16 @@ pub fn c_decl(ty: &Type, name: &str) -> String {
         Type::Bool => format!("bool {}", name),
         Type::String => format!("const char* {}", name),
         Type::Void => format!("void {}", name),
-        Type::Function {
-            params,
-            return_type,
-        } => {
-            let params = params
-                .iter()
-                .map(|p| c_decl(p, "").trim_end().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "{} (*{})({})",
-                c_decl(return_type, "").trim_end(),
-                name,
-                params
-            )
-        }
+        // Function values are closure pointers (see rune_rt.h) regardless
+        // of their signature.
+        Type::Function { .. } => format!("void* {}", name),
     }
 }
 
-/// Renders a function signature line `RET NAME(PARAMS)`, handling the
-/// function-returning-function case via C's declarator syntax.
+/// Renders a function signature line `RET NAME(PARAMS)`. Functions
+/// returning closures return `void*` like any function value.
 pub fn c_signature(ret: &Type, name_and_params: &str) -> String {
-    if let Type::Function {
-        params,
-        return_type,
-    } = ret
-    {
-        let params = params
-            .iter()
-            .map(|p| c_decl(p, "").trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        // `RET (*name(args))(inner_params)` declares a function returning a
-        // function pointer.
-        format!(
-            "{} (*{})({})",
-            c_decl(return_type, "").trim_end(),
-            name_and_params,
-            params
-        )
-    } else {
-        format!("{} {}", c_decl(ret, "").trim_end(), name_and_params)
-    }
+    format!("{} {}", c_decl(ret, "").trim_end(), name_and_params)
 }
 
 /// The C type name for a value type, or None for function types (which need
@@ -71,6 +38,6 @@ pub fn c_value_type(ty: &Type) -> Option<&'static str> {
         Type::Bool => Some("bool"),
         Type::String => Some("const char*"),
         Type::Void => Some("void"),
-        Type::Function { .. } => None,
+        Type::Function { .. } => Some("void*"),
     }
 }

@@ -153,11 +153,14 @@ them.
   side effects behave exactly as they would in C.
 - Every function's fall-through end gets an implicit `Return(None)`.
 - Anonymous function expressions are **hoisted**: each body becomes a
-  synthesized top-level function (`rune_lambda_N`), discovered through a
+  synthesized top-level function (`rune_lambda_N`) whose parameters are the
+  user's parameters followed by the captured variables, discovered through a
   worklist since lambda bodies can contain further lambdas. The expression
-  lowers to a function reference, reusing all the function-value machinery.
-  The checker rejects captures by checking lambda bodies against only their
-  parameters — captured environments are future work.
+  lowers to a `MakeClosure` instruction (by-value captures) — the closure's
+  code word points at an env-first **wrapper** that drops the environment
+  and forwards to the target function. The checker allows reads of outer
+  variables (captures type-check against the captured variable's type) and
+  rejects assignment to captured variables.
 - A `type` environment is rebuilt during lowering (parameters, `let` bindings,
   block scoping) so each instruction carries the type its C emission needs.
 

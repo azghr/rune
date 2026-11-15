@@ -64,6 +64,14 @@ pub enum Instruction {
         args: Vec<Value>,
         ty: Type,
     },
+    /// dest = a closure over `func` capturing `captures` by value. The
+    /// closure's code word points at the target's env-first wrapper.
+    MakeClosure {
+        dest: String,
+        func: String,
+        captures: Vec<Value>,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone)]

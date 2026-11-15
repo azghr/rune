@@ -348,15 +348,30 @@ fn lambda_return_type_mismatches_are_errors() {
 }
 
 #[test]
-fn captures_are_rejected_with_a_clear_error() {
-    // Closures that capture their environment are not supported yet; the
-    // body is checked against only its parameters.
+fn captures_type_check_against_the_captured_variable() {
+    // by-value captures: reads inside the lambda check against the outer
+    // variable's type
+    analyze(
+        "fn main() {
+            let n = 5
+            let addn = fn(x: int) -> int { return x + n }
+            print(addn(1))
+        }",
+    );
+}
+
+#[test]
+fn errors_on_assigning_to_a_captured_variable() {
     let errs = analyze_errors(
-        "fn main() { let n = 5 let addn = fn(x: int) -> int { return x + n } print(addn(1)) }",
+        "fn main() {
+            let mut n = 5
+            let bump = fn(x: int) -> int { n = n + x return n }
+            print(bump(1))
+        }",
     );
     assert!(
         errs.iter()
-            .any(|e| e.message.contains("undefined variable `n`"))
+            .any(|e| e.message.contains("cannot assign to captured variable `n`"))
     );
 }
 

@@ -262,23 +262,12 @@ impl ExprLowerer<'_> {
     }
 
     fn var_type(&self, name: &str) -> Type {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|s| s.get(name).cloned())
-            .unwrap_or(Type::Int)
+        self.local_type(name).unwrap_or(Type::Int)
     }
 
-    /// The type of a name in expression position: a local variable, or a
-    /// declared function (yielding its full function type).
-    fn var_type_or_fn(&self, name: &str) -> Type {
-        if let Some(ty) = self.scopes.iter().rev().find_map(|s| s.get(name).cloned()) {
-            return ty;
-        }
-        self.function_returns
-            .get(name)
-            .cloned()
-            .unwrap_or(Type::Int)
+    /// The type of a local variable, if one is in scope.
+    fn local_type(&self, name: &str) -> Option<Type> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).cloned())
     }
 
     fn call_type(&self, callee: &str) -> Type {
@@ -533,8 +522,23 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
         Expr::Bool { value, .. } => (Value::ConstBool(*value), Type::Bool),
         Expr::String { value, .. } => (Value::ConstString(value.clone()), Type::String),
         Expr::Variable { name, .. } => {
-            let ty = lowerer.var_type_or_fn(name);
-            (Value::Local(name.clone()), ty)
+            // A declared function used as a value becomes a closure over
+            // it (no captures); locals pass through unchanged.
+            if lowerer.local_type(name).is_none()
+                && let Some(ty) = lowerer.function_returns.get(name)
+            {
+                let dest = builder.fresh_temp();
+                builder.push(Instruction::MakeClosure {
+                    dest: dest.clone(),
+                    func: name.clone(),
+                    captures: Vec::new(),
+                    ty: ty.clone(),
+                });
+                (Value::Local(dest), ty.clone())
+            } else {
+                let ty = lowerer.var_type(name);
+                (Value::Local(name.clone()), ty)
+            }
         }
         Expr::Grouping { expr, .. } => lower_expr(builder, lowerer, expr),
         Expr::Unary {
@@ -602,23 +606,42 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
             body,
             ..
         } => {
-            // Hoist the body into a synthesized top-level function; the
-            // expression's value is a reference to it. Captures are already
-            // rejected by the checker, so the lambda needs no environment.
+            // Hoist the body into a synthesized top-level function whose
+            // parameters are the user's parameters followed by the captured
+            // variables (by value); the expression builds a closure over it.
+            let captures = collect_captures(body, params, lowerer);
             let name = format!("rune_lambda_{}", lowerer.lambda_counter.get());
             lowerer.lambda_counter.set(lowerer.lambda_counter.get() + 1);
             let ty = Type::Function {
                 params: params.iter().map(|p| p.ty.clone()).collect(),
                 return_type: Box::new(return_type.clone().unwrap_or(Type::Void)),
             };
+            let mut hoisted_params = params.clone();
+            for (cap_name, cap_ty) in &captures {
+                hoisted_params.push(Param {
+                    name: cap_name.clone(),
+                    ty: cap_ty.clone(),
+                    span: expr.span(),
+                });
+            }
             lowerer.worklist.push(AstFunction {
                 name: name.clone(),
-                params: params.clone(),
+                params: hoisted_params,
                 return_type: return_type.clone(),
                 body: body.clone(),
                 span: expr.span(),
             });
-            (Value::Local(name), ty)
+            let dest = builder.fresh_temp();
+            builder.push(Instruction::MakeClosure {
+                dest: dest.clone(),
+                func: name,
+                captures: captures
+                    .into_iter()
+                    .map(|(name, _)| Value::Local(name))
+                    .collect(),
+                ty: ty.clone(),
+            });
+            (Value::Local(dest), ty)
         }
     }
 }
@@ -756,5 +779,155 @@ fn lower_call(
         // The checker never lets a void call appear in value position; this
         // dummy keeps the type system happy.
         None => (Value::ConstBool(false), Type::Void),
+    }
+}
+
+/// The free variables of a lambda body: names it reads that are neither its
+/// parameters, locally declared, nor declared functions — with their types
+/// from the enclosing scope, in first-use order. Captures are by value.
+fn collect_captures(
+    body: &Block,
+    params: &[Param],
+    lowerer: &ExprLowerer<'_>,
+) -> Vec<(String, Type)> {
+    let mut declared: HashSet<String> = params.iter().map(|p| p.name.clone()).collect();
+    collect_declared_names(&body.statements, &mut declared);
+
+    let mut captures: Vec<(String, Type)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    walk_capture_reads(
+        &body.statements,
+        &declared,
+        lowerer,
+        &mut captures,
+        &mut seen,
+    );
+    captures
+}
+
+fn walk_capture_reads(
+    statements: &[Stmt],
+    declared: &HashSet<String>,
+    lowerer: &ExprLowerer<'_>,
+    captures: &mut Vec<(String, Type)>,
+    seen: &mut HashSet<String>,
+) {
+    for stmt in statements {
+        match stmt {
+            Stmt::Let { value, .. }
+            | Stmt::Return {
+                value: Some(value), ..
+            } => {
+                walk_capture_expr(value, declared, lowerer, captures, seen);
+            }
+            Stmt::Assign { value, .. } => {
+                walk_capture_expr(value, declared, lowerer, captures, seen);
+            }
+            Stmt::Expr(expr) => {
+                walk_capture_expr(expr, declared, lowerer, captures, seen);
+            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                walk_capture_expr(condition, declared, lowerer, captures, seen);
+                walk_capture_reads(&then_branch.statements, declared, lowerer, captures, seen);
+                if let Some(b) = else_branch {
+                    walk_capture_reads(&b.statements, declared, lowerer, captures, seen);
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                walk_capture_expr(condition, declared, lowerer, captures, seen);
+                walk_capture_reads(&body.statements, declared, lowerer, captures, seen);
+            }
+            Stmt::For {
+                init,
+                condition,
+                step,
+                body,
+                ..
+            } => {
+                if let Some(init) = init {
+                    walk_capture_reads(
+                        std::slice::from_ref(init),
+                        declared,
+                        lowerer,
+                        captures,
+                        seen,
+                    );
+                }
+                if let Some(cond) = condition {
+                    walk_capture_expr(cond, declared, lowerer, captures, seen);
+                }
+                if let Some(step) = step {
+                    walk_capture_reads(
+                        std::slice::from_ref(step),
+                        declared,
+                        lowerer,
+                        captures,
+                        seen,
+                    );
+                }
+                walk_capture_reads(&body.statements, declared, lowerer, captures, seen);
+            }
+            Stmt::Block(block) => {
+                walk_capture_reads(&block.statements, declared, lowerer, captures, seen);
+            }
+            Stmt::Return { value: None, .. } | Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        }
+    }
+}
+
+fn walk_capture_expr(
+    expr: &Expr,
+    declared: &HashSet<String>,
+    lowerer: &ExprLowerer<'_>,
+    captures: &mut Vec<(String, Type)>,
+    seen: &mut HashSet<String>,
+) {
+    match expr {
+        Expr::Variable { name, span } => {
+            // Skip names declared inside the lambda and declared functions.
+            if declared.contains(name) || lowerer.function_returns.contains_key(name) {
+                return;
+            }
+            if seen.contains(name) {
+                return;
+            }
+            // A capture only if the enclosing scope declares it; anything
+            // else stays the checker's `undefined variable` problem.
+            if let Some(ty) = lowerer
+                .scopes
+                .iter()
+                .rev()
+                .find_map(|s| s.get(name).cloned())
+            {
+                seen.insert(name.clone());
+                captures.push((name.clone(), ty));
+            } else {
+                let _ = span;
+            }
+        }
+        Expr::Grouping { expr, .. } => {
+            walk_capture_expr(expr, declared, lowerer, captures, seen);
+        }
+        Expr::Unary { expr, .. } => {
+            walk_capture_expr(expr, declared, lowerer, captures, seen);
+        }
+        Expr::Binary { left, right, .. } => {
+            walk_capture_expr(left, declared, lowerer, captures, seen);
+            walk_capture_expr(right, declared, lowerer, captures, seen);
+        }
+        Expr::Call { callee, args, .. } => {
+            walk_capture_expr(callee, declared, lowerer, captures, seen);
+            for arg in args {
+                walk_capture_expr(arg, declared, lowerer, captures, seen);
+            }
+        }
+        _ => {}
     }
 }

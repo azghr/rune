@@ -411,11 +411,14 @@ fn calls_through_function_values_lower_to_call_indirect() {
     assert!(insts.iter().any(
         |i| matches!(i, Instruction::CallIndirect { callee: Value::Local(n), .. } if n == "f")
     ));
-    // binding a function reference is a Move of the function's name
+    // binding a function reference creates a (capture-less) closure over it
     assert!(insts.iter().any(|i| matches!(
         i,
-        Instruction::Move { dest, value: Value::Local(v), ty: Type::Function { .. } }
-            if dest == "f" && v == "twice"
+        Instruction::MakeClosure {
+            func,
+            captures,
+            ..
+        } if func == "twice" && captures.is_empty()
     )));
 }
 
@@ -452,16 +455,22 @@ fn anonymous_functions_are_hoisted_to_named_functions() {
     assert_eq!(module.functions.len(), 2, "lambda hoisted beside main");
     assert_eq!(module.functions[0].name, "main");
     assert_eq!(module.functions[1].name, "rune_lambda_0");
-    // the reference is a move of the lambda's name with its function type
+    // binding the lambda builds a closure over the hoisted function
     let main = &module.functions[0];
     assert!(main.body[0].instructions.iter().any(|i| matches!(
         i,
-        Instruction::Move {
-            dest,
-            value: Value::Local(v),
-            ty: Type::Function { .. },
-        } if dest == "f" && v == "rune_lambda_0"
+        Instruction::MakeClosure {
+            func,
+            captures,
+            ..
+        } if func == "rune_lambda_0" && captures.is_empty()
     )));
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Move { dest, .. } if dest == "f"))
+    );
 }
 
 #[test]

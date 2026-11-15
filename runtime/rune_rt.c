@@ -5,6 +5,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+void *rune_closure_new(void *code, int n_caps) {
+  void **block = malloc(8 * (size_t)(n_caps + 1));
+  if (!block) {
+    return NULL;
+  }
+  block[0] = code;
+  return block;
+}
+
+void rune_closure_set(void *closure, int idx, int64_t value) {
+  ((int64_t *)closure)[idx + 1] = value;
+}
+
 /* Concatenates two strings into freshly allocated storage. The result is
  * never freed: Rune strings are immutable `const char*` values, so ownership
  * is not tracked. Treat the compiler as garbage-producing for now. */

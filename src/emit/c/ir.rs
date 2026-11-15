@@ -24,12 +24,88 @@ pub fn generate(module: &Module) -> String {
     for func in &module.functions {
         let _ = writeln!(out, "{};", signature(func));
     }
+
+    // Closures call their target through env-first wrappers; declare and
+    // define one for every function a MakeClosure references.
+    let closure_targets = closure_targets(module);
+    for name in &closure_targets {
+        let target = module
+            .functions
+            .iter()
+            .find(|f| &f.name == name)
+            .expect("closure target must be a declared function");
+        let _ = writeln!(out, "{};", closure_wrapper_signature(target));
+    }
     out.push('\n');
 
     for func in &module.functions {
         emit_function(&mut out, func);
     }
+    for name in closure_targets {
+        let target = module
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .expect("closure target must be a declared function");
+        emit_closure_wrapper(&mut out, target);
+    }
     out
+}
+
+/// The env-first wrapper for a closure target: drops the environment and
+/// forwards to the real function.
+fn closure_wrapper_name(func: &str) -> String {
+    format!("rune_closure_{func}")
+}
+
+fn closure_wrapper_signature(target: &Function) -> String {
+    let params = std::iter::once("void *env".to_string())
+        .chain(
+            target
+                .params
+                .iter()
+                .map(|(n, ty)| super::ctype::c_decl(ty, n)),
+        )
+        .collect::<Vec<_>>()
+        .join(", ");
+    super::ctype::c_signature(
+        &target.return_type,
+        &format!("{}({})", closure_wrapper_name(&target.name), params),
+    )
+}
+
+fn emit_closure_wrapper(out: &mut String, target: &Function) {
+    out.push_str(&closure_wrapper_signature(target));
+    out.push_str(" {\n    (void)env;\n    ");
+    if target.return_type != Type::Void {
+        out.push_str("return ");
+    }
+    let _ = write!(out, "{}(", target.name);
+    for (i, (name, _)) in target.params.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(name);
+    }
+    out.push_str(");\n}\n\n");
+}
+
+/// Unique functions referenced by MakeClosure instructions, in first-use
+/// order.
+fn closure_targets(module: &Module) -> Vec<String> {
+    let mut names = Vec::new();
+    for func in &module.functions {
+        for block in &func.body {
+            for inst in &block.instructions {
+                if let Instruction::MakeClosure { func: target, .. } = inst
+                    && !names.contains(target)
+                {
+                    names.push(target.clone());
+                }
+            }
+        }
+    }
+    names
 }
 
 fn signature(func: &Function) -> String {
@@ -75,7 +151,8 @@ fn local_types(func: &Function) -> HashMap<&str, Type> {
                     dest: Some(dest),
                     ty,
                     ..
-                } => (dest.as_str(), ty.clone()),
+                }
+                | Instruction::MakeClosure { dest, ty, .. } => (dest.as_str(), ty.clone()),
                 Instruction::Call { dest: None, .. }
                 | Instruction::CallIndirect { dest: None, .. } => continue,
             };
@@ -217,18 +294,66 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             if let Some(dest) = dest {
                 let _ = write!(out, "{} = ", dest);
             }
-            // In C, calling through a function pointer uses the same
-            // syntax as a direct call.
-            emit_value(out, callee);
-            out.push('(');
-            for (i, arg) in args.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
+            // Function values are closures: the code word is the first
+            // field of the block. Cast it to an env-first signature and
+            // pass the closure itself as the environment.
+            let callee_text = match callee {
+                Value::Local(name) => name.clone(),
+                other => unreachable!("non-local callee {other:?} in CallIndirect"),
+            };
+            let callee_ty = value_type(callee, types);
+            let (sig_params, ret_decl) = match &callee_ty {
+                Type::Function {
+                    params,
+                    return_type,
+                } => {
+                    // env pointer first, then the signature's parameters
+                    let ps = std::iter::once("void *".to_string())
+                        .chain(
+                            params
+                                .iter()
+                                .map(|p| super::ctype::c_decl(p, "").trim_end().to_string()),
+                        )
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (
+                        ps,
+                        super::ctype::c_decl(return_type, "").trim_end().to_string(),
+                    )
                 }
+                _ => ("void *".to_string(), "int64_t".to_string()),
+            };
+            let _ = write!(
+                out,
+                "(({} (*)({}))(*((void **){})))( {}",
+                ret_decl, sig_params, callee_text, callee_text
+            );
+            for arg in args {
+                out.push_str(", ");
                 emit_value(out, arg);
             }
             out.push(')');
             out.push_str(";\n");
+        }
+        Instruction::MakeClosure {
+            dest,
+            func,
+            captures,
+            ..
+        } => {
+            // Allocate a closure block: [wrapper code, capture values...].
+            let _ = writeln!(
+                out,
+                "{} = rune_closure_new((void *){}, {});",
+                dest,
+                closure_wrapper_name(func),
+                captures.len()
+            );
+            for (idx, cap) in captures.iter().enumerate() {
+                let _ = write!(out, "rune_closure_set({}, {}, (int64_t)(", dest, idx);
+                emit_value(out, cap);
+                out.push_str("));\n");
+            }
         }
     }
 }

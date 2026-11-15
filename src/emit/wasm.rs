@@ -175,11 +175,15 @@ fn check_function(func: &Function) -> Result<(), String> {
             if let Instruction::CallIndirect { .. } = inst {
                 return Err(unsupported("calls through function values"));
             }
+            if let Instruction::MakeClosure { .. } = inst {
+                return Err(unsupported("closures"));
+            }
             let tys = match inst {
                 Instruction::Binary { ty, .. }
                 | Instruction::Unary { ty, .. }
                 | Instruction::Move { ty, .. }
-                | Instruction::Call { ty, .. } => vec![ty.clone()],
+                | Instruction::Call { ty, .. }
+                | Instruction::MakeClosure { ty, .. } => vec![ty.clone()],
                 Instruction::CallIndirect { .. } => unreachable!("checked above"),
             };
             for ty in tys {
@@ -254,7 +258,8 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                 | Instruction::Move { dest, .. }
                 | Instruction::Call {
                     dest: Some(dest), ..
-                } => dest,
+                }
+                | Instruction::MakeClosure { dest, .. } => dest,
                 Instruction::Call { dest: None, .. } | Instruction::CallIndirect { .. } => continue,
             };
             if !types.iter().any(|(n, _)| n == dest) {
@@ -264,7 +269,8 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                     | Instruction::Move { ty, .. }
                     | Instruction::Call {
                         dest: Some(_), ty, ..
-                    } => ty.clone(),
+                    }
+                    | Instruction::MakeClosure { ty, .. } => ty.clone(),
                     Instruction::Call { dest: None, .. } | Instruction::CallIndirect { .. } => {
                         continue;
                     }
@@ -450,7 +456,9 @@ fn emit_instruction(
                 let _ = ty;
             }
         }
-        Instruction::CallIndirect { .. } => unreachable!("rejected by check_function"),
+        Instruction::CallIndirect { .. } | Instruction::MakeClosure { .. } => {
+            unreachable!("rejected by check_function")
+        }
     }
 }
 

@@ -94,24 +94,31 @@ fn anonymous_functions_become_named_c_functions() {
     // generated function and its pointer-typed binding appear in the C
     let c = common::compile("fn main() { let f = fn(x: int) -> int { return x + 1 } print(f(1)) }")
         .expect("compiles");
-    assert!(c.contains("int64_t rune_lambda_0(int64_t x)"));
-    assert!(c.contains("int64_t (*f)(int64_t);"));
-    assert!(c.contains("f = rune_lambda_0;"));
+    assert!(c.contains("int64_t rune_lambda_0(int64_t x);"));
+    // function values are closure pointers; the lambda is wrapped env-first
+    assert!(c.contains("void* f;"));
+    assert!(c.contains("rune_closure_new((void *)rune_closure_rune_lambda_0, 0);"));
+    assert!(c.contains("int64_t rune_closure_rune_lambda_0(void *env, int64_t x)"));
+    // calls read the code word and pass the closure as the environment
+    assert!(c.contains("((int64_t (*)(void *, int64_t))(*((void **)f)))( f, 1);"));
 }
 
 #[test]
-fn function_values_become_c_function_pointers() {
-    let c = generate(
+fn function_values_become_closures() {
+    let c = common::compile(
         "fn twice(n: int) -> int { return n * 2 }
         fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
         fn main() { let f = twice print(apply(f, 5)) }",
-    );
-    // fn-typed parameter uses pointer declarator syntax
-    assert!(c.contains("int64_t apply(int64_t (*f)(int64_t), int64_t x)"));
-    // fn-typed local too
-    assert!(c.contains("int64_t (*f)(int64_t) = twice;"));
-    // calling through it uses ordinary call syntax
-    assert!(c.contains("f(x)"));
+    )
+    .expect("compiles");
+    // fn-typed parameters and locals are closure pointers
+    assert!(c.contains("int64_t apply(void* f, int64_t x)"));
+    assert!(c.contains("void* f;"));
+    // a function reference builds a closure over an env-first wrapper
+    assert!(c.contains("rune_closure_new((void *)rune_closure_twice, 0);"));
+    assert!(c.contains("int64_t rune_closure_twice(void *env, int64_t n)"));
+    // the wrapper forwards to the real function, dropping the environment
+    assert!(c.contains("return twice(n);"));
 }
 
 #[test]

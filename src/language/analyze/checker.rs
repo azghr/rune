@@ -22,6 +22,9 @@ pub struct Analyzer {
     current_return_type: Option<Type>,
     /// Nesting depth of loops, for validating `break`/`continue`.
     loop_depth: usize,
+    /// Scope-stack depth at each enclosing anonymous function's entry, for
+    /// rejecting assignment to captured variables.
+    lambda_depths: Vec<usize>,
     functions: HashMap<String, FunctionSignature>,
     errors: Vec<Diagnostic>,
 }
@@ -38,6 +41,7 @@ impl Analyzer {
             scopes: ScopeStack::new(),
             current_return_type: None,
             loop_depth: 0,
+            lambda_depths: Vec::new(),
             functions: HashMap::new(),
             errors: Vec::new(),
         }
@@ -154,6 +158,18 @@ impl Analyzer {
                 if !sym.mutable {
                     self.error(
                         format!("cannot assign to immutable variable `{}`", name),
+                        *span,
+                    );
+                    return;
+                }
+                if let Some(&entry) = self.lambda_depths.last()
+                    && self.scopes.depth_of(name).is_some_and(|d| d < entry)
+                {
+                    self.error(
+                        format!(
+                            "cannot assign to captured variable `{}`: captures are by value",
+                            name
+                        ),
                         *span,
                     );
                     return;
@@ -586,16 +602,15 @@ impl Analyzer {
                 params,
                 return_type,
                 body,
-                span,
+                span: _,
             } => {
-                // The body is checked against ONLY its parameters: the
-                // enclosing scope stack is swapped out, so referencing an
-                // outer local is a compile error — capturing environments
-                // is not supported yet. Declared functions remain
-                // referenceable through the function table.
+                // The body is checked with the enclosing scopes visible so
+                // captures (by value, at closure creation) type-check
+                // against the captured variable's type. Assignment to a
+                // captured variable is rejected: captures are snapshots.
                 let ret = return_type.clone().unwrap_or(Type::Void);
-                let saved_scopes = std::mem::take(&mut self.scopes);
-                self.scopes = ScopeStack::new();
+                let entry_depth = self.scopes.depth();
+                self.lambda_depths.push(entry_depth);
                 self.scopes.push();
                 for p in params {
                     let _ = self.scopes.define(Symbol {
@@ -609,8 +624,8 @@ impl Analyzer {
                 self.current_return_type = Some(ret.clone());
                 self.analyze_block(body);
                 self.current_return_type = saved_return;
-                self.scopes = saved_scopes;
-                let _ = span;
+                self.scopes.pop();
+                self.lambda_depths.pop();
                 Type::Function {
                     params: params.iter().map(|p| p.ty.clone()).collect(),
                     return_type: Box::new(ret),

@@ -26,6 +26,7 @@ impl Parser {
                 | TokenKind::True
                 | TokenKind::False
                 | TokenKind::Print
+                | TokenKind::Fn
                 | TokenKind::LParen
                 | TokenKind::Minus
                 | TokenKind::Bang

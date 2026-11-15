@@ -98,8 +98,11 @@ impl ConstFold {
                         constants.insert(dest, result);
                     }
                 }
-                // Calls can have side effects; leave them alone.
-                Instruction::Call { .. } | Instruction::CallIndirect { .. } => {}
+                // Calls and closure creation can have side effects; leave
+                // them alone.
+                Instruction::Call { .. }
+                | Instruction::CallIndirect { .. }
+                | Instruction::MakeClosure { .. } => {}
             }
         }
 

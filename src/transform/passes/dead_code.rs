@@ -84,7 +84,9 @@ impl DeadCodeElim {
             Instruction::Binary { dest, .. }
             | Instruction::Unary { dest, .. }
             | Instruction::Move { dest, .. } => Some(dest.clone()),
-            Instruction::Call { .. } | Instruction::CallIndirect { .. } => None,
+            Instruction::Call { .. }
+            | Instruction::CallIndirect { .. }
+            | Instruction::MakeClosure { .. } => None,
         }
     }
 
@@ -107,6 +109,11 @@ impl DeadCodeElim {
                 Self::push_value_uses(callee, &mut uses);
                 for arg in args {
                     Self::push_value_uses(arg, &mut uses);
+                }
+            }
+            Instruction::MakeClosure { captures, .. } => {
+                for cap in captures {
+                    Self::push_value_uses(cap, &mut uses);
                 }
             }
         }
@@ -134,7 +141,9 @@ impl DeadCodeElim {
             // Calls may have side effects; always keep them.
             let keep = matches!(
                 inst,
-                Instruction::Call { .. } | Instruction::CallIndirect { .. }
+                Instruction::Call { .. }
+                    | Instruction::CallIndirect { .. }
+                    | Instruction::MakeClosure { .. }
             ) || Self::dest_of(inst).is_some_and(|dest| live.contains(&dest));
 
             if keep {
