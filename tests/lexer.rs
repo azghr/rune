@@ -123,6 +123,12 @@ fn lexes_the_for_keyword() {
 }
 
 #[test]
+fn lexes_break_and_continue_keywords() {
+    assert_eq!(tokens("break")[0].kind, TokenKind::Break);
+    assert_eq!(tokens("continue")[0].kind, TokenKind::Continue);
+}
+
+#[test]
 fn skips_comments() {
     let kinds: Vec<TokenKind> = tokens("// full line comment\n42 // trailing\n")
         .into_iter()

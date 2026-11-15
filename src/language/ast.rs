@@ -65,6 +65,19 @@ pub enum Stmt {
         body: Block,
         span: Span,
     },
+    For {
+        init: Option<Box<Stmt>>,
+        condition: Option<Expr>,
+        step: Option<Box<Stmt>>,
+        body: Block,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
     Block(Block),
 }
 

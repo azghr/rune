@@ -24,7 +24,8 @@ and linked against a small C runtime.
 
 - Statically typed with `int`, `bool`, `string`, and `void`
 - C-family syntax: functions, `let`/`let mut` bindings, `if`/`else if`/`else`,
-  `while`, `for`, `return`, and compound assignment (`+=` etc.)
+  `while`, `for`, `break`/`continue`, `return`, and compound assignment
+  (`+=` etc.)
 - Logical operators (`&&`, `||`) with correct precedence
 - Immutability by default: only `mut` variables can be reassigned
 - String comparison with `==`/`!=` compares contents

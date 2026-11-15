@@ -228,6 +228,72 @@ fn for_loops_work_end_to_end() {
 }
 
 #[test]
+fn break_and_continue_work_in_while_loops() {
+    let out = run_program(
+        "fn main() {
+            let mut i = 0
+            let mut hits = 0
+            while i < 10 {
+                i += 1
+                if i == 3 {
+                    continue
+                }
+                if i > 6 {
+                    break
+                }
+                hits += 1
+            }
+            print(hits)
+        }",
+    );
+    // skips 3, breaks after 6: counts 1, 2, 4, 5, 6
+    assert_eq!(out, "5\n");
+}
+
+#[test]
+fn for_loop_continue_still_runs_the_step() {
+    // if `continue` skipped the step clause, this loop would never terminate
+    let out = run_program(
+        "fn main() {
+            for let mut n = 0; n < 5; n += 1 {
+                if n == 2 {
+                    continue
+                }
+                if n == 4 {
+                    break
+                }
+                print(n)
+            }
+        }",
+    );
+    assert_eq!(out, "0\n1\n3\n");
+}
+
+#[test]
+fn break_in_nested_loops_only_exits_the_inner_one() {
+    let out = run_program(
+        "fn main() {
+            let mut x = 0
+            while x < 3 {
+                let mut y = 0
+                while y < 3 {
+                    y += 1
+                    if y == 2 {
+                        break
+                    }
+                }
+                x += 1
+                if x == 1 {
+                    continue
+                }
+                print(x)
+            }
+        }",
+    );
+    assert_eq!(out, "2\n3\n");
+}
+
+#[test]
 fn reassigning_from_a_call_beats_constant_propagation() {
     // Regression: ConstFold once kept `x -> 1` across `x = f()` and
     // folded `print(x)` into `print(1)`.

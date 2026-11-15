@@ -18,7 +18,8 @@ when it is tagged.
 - `let` bindings with optional type annotations; immutability by default
   with `let mut` for reassignable variables
 - Control flow: `if`/`else if`/`else`, `while`, C-style `for` with optional
-  clauses, and `return` (valued and bare)
+  clauses, `break`/`continue` (innermost loop, with C `continue` semantics),
+  and `return` (valued and bare)
 - Operators: arithmetic, comparison, equality, short-circuit `&&`/`||`, and
   compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`; `+=` concatenates
   strings); statements are separated by newlines or semicolons

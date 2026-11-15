@@ -339,6 +339,66 @@ fn assigning_a_non_constant_invalidates_known_constants() {
 }
 
 #[test]
+fn break_lowers_to_a_jump_to_the_loop_exit() {
+    let module = lowered("fn main() { while true { break } }");
+    let body = &module.functions[0].body;
+    // entry -> cond -> body -> exit; the break block jumps to the exit
+    let exit = body.len() - 1;
+    assert!(
+        body.iter()
+            .any(|b| matches!(b.terminator, Terminator::Jump(t) if t == exit))
+    );
+}
+
+#[test]
+fn continue_in_while_jumps_to_the_condition() {
+    let module = lowered("fn main() { let mut i = 0 while i < 3 { i += 1 continue } }");
+    let body = &module.functions[0].body;
+    // the cond block is block 1 (entry jumps to it); some block must jump back
+    assert!(
+        body.iter()
+            .any(|b| matches!(b.terminator, Terminator::Jump(1)))
+    );
+}
+
+#[test]
+fn continue_in_for_runs_the_step_clause() {
+    // C semantics: `continue` must NOT skip `i += 1`, or the loop would not
+    // terminate. The IR routes `continue` into the step block.
+    let module = lowered("fn main() { for let mut i = 0; i < 3; i += 1 { continue } }");
+    let body = &module.functions[0].body;
+    // the step block holds the `i + 1` computation and jumps back to the
+    // condition block (block 1, since the entry jumps to the condition)
+    let step_block = body
+        .iter()
+        .find(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(
+                    i,
+                    Instruction::Binary {
+                        left: Value::Local(n),
+                        op: BinOp::Add,
+                        right: Value::ConstInt(1),
+                        ..
+                    } if n == "i"
+                )
+            })
+        })
+        .expect("step block with `i += 1` should exist");
+    assert!(
+        matches!(step_block.terminator, Terminator::Jump(1)),
+        "step must jump back to the condition block, got {:?}",
+        step_block.terminator
+    );
+    // and the loop body routes `continue` into the step block
+    let step_id = step_block.id;
+    assert!(
+        body.iter()
+            .any(|b| matches!(b.terminator, Terminator::Jump(t) if t == step_id))
+    );
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

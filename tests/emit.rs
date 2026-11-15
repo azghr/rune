@@ -89,6 +89,19 @@ fn string_equality_is_emitted_as_strcmp() {
 }
 
 #[test]
+fn for_loops_become_c_for_loops() {
+    let c = generate("fn main() { for let mut i = 0; i < 3; i += 1 { print(i) } }");
+    assert!(c.contains("for (int64_t i = 0; (i < 3); i += 1) {"));
+}
+
+#[test]
+fn break_and_continue_become_c_break_and_continue() {
+    let c = generate("fn main() { while true { break continue } }");
+    assert!(c.contains("break;"));
+    assert!(c.contains("continue;"));
+}
+
+#[test]
 fn string_concatenation_is_emitted_as_rune_strcat() {
     let c = generate("fn main() { let a = \"x\" print(a + \"y\") print(\"a\" + \"b\" == \"ab\") }");
     assert!(c.contains("rune_strcat(a, \"y\")"));

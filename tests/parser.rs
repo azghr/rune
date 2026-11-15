@@ -276,46 +276,64 @@ fn parses_compound_assignment() {
 /// The `for` loop is pure syntax sugar: it desugars into a block holding
 /// the initializer followed by a `while` whose body ends with the step.
 #[test]
-fn for_loop_desugars_into_block_with_while() {
+fn parses_for_loop_clauses() {
     let func = only_function("fn main() { for let mut i = 0; i < 3; i += 1 { print(i) } }");
-    let Stmt::Block(block) = &func.body.statements[0] else {
-        panic!("expected desugared block");
-    };
-    assert_eq!(block.statements.len(), 2);
-    assert!(matches!(&block.statements[0], Stmt::Let { .. }));
-    let Stmt::While {
-        condition, body, ..
-    } = &block.statements[1]
-    else {
-        panic!("expected while inside the desugared block");
-    };
-    // cond is the parsed condition; body ends with the step statement
-    assert!(matches!(condition, Expr::Binary { .. }));
-    let Stmt::Assign {
-        op: TokenKind::PlusEq,
+    let Stmt::For {
+        init,
+        condition,
+        step,
+        body,
         ..
-    } = body.statements.last().unwrap()
+    } = &func.body.statements[0]
     else {
-        panic!("expected step assignment at the end of the loop body");
+        panic!("expected a for statement");
     };
+    assert!(matches!(init.as_deref(), Some(Stmt::Let { .. })));
+    assert!(matches!(condition, Some(Expr::Binary { .. })));
+    assert!(matches!(
+        step.as_deref(),
+        Some(Stmt::Assign {
+            op: TokenKind::PlusEq,
+            ..
+        })
+    ));
+    assert_eq!(body.statements.len(), 1);
+}
+
+#[test]
+fn for_loop_keeps_its_own_ast_node() {
+    // `for` is NOT desugared into `while`: `continue` in a for loop must
+    // reach the step clause, which only a dedicated node can express.
+    let func = only_function("fn main() { for ;; { continue } }");
+    assert!(matches!(&func.body.statements[0], Stmt::For { .. }));
+}
+
+#[test]
+fn parses_break_and_continue() {
+    let func = only_function("fn main() { while true { break continue } }");
+    let Stmt::While { body, .. } = &func.body.statements[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(&body.statements[0], Stmt::Break { .. }));
+    assert!(matches!(&body.statements[1], Stmt::Continue { .. }));
 }
 
 #[test]
 fn for_loop_clauses_are_optional() {
-    // all clauses empty: infinite loop
+    // all clauses empty: an infinite loop with a synthesized `true` condition
     let func = only_function("fn main() { for ;; { return } }");
-    let Stmt::Block(block) = &func.body.statements[0] else {
-        panic!("expected desugared block");
+    let Stmt::For {
+        init,
+        condition,
+        step,
+        ..
+    } = &func.body.statements[0]
+    else {
+        panic!("expected a for statement");
     };
-    assert_eq!(
-        block.statements.len(),
-        1,
-        "no init means only the while remains"
-    );
-    let Stmt::While { condition, .. } = &block.statements[0] else {
-        panic!("expected while");
-    };
-    assert!(matches!(condition, Expr::Bool { value: true, .. }));
+    assert!(init.is_none());
+    assert!(condition.is_none());
+    assert!(step.is_none());
 }
 
 #[test]

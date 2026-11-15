@@ -114,6 +114,40 @@ impl CGenerator {
         self.line("");
     }
 
+    /// Emits a simple statement without its trailing `;`, for the init and
+    /// step clauses of a C `for` header.
+    fn emit_for_clause(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Let { name, value, .. } => {
+                let ty = self.infer_type(value);
+                self.declare_var(name, ty.clone());
+                write!(self.output, "{} {} = ", Self::c_type_name(&ty), name).unwrap();
+                self.emit_expr(value);
+            }
+            Stmt::Assign {
+                name, op, value, ..
+            } => {
+                if matches!(op, TokenKind::Plus | TokenKind::PlusEq)
+                    && self.var_type(name) == Some(Type::String)
+                {
+                    write!(self.output, "{} = rune_strcat({}, ", name, name).unwrap();
+                    self.emit_expr(value);
+                    self.output.push(')');
+                } else if *op == TokenKind::Eq {
+                    write!(self.output, "{} = ", name).unwrap();
+                    self.emit_expr(value);
+                } else {
+                    write!(self.output, "{} {}= ", name, Self::op_to_c(op)).unwrap();
+                    self.emit_expr(value);
+                }
+            }
+            Stmt::Expr(expr) => self.emit_expr(expr),
+            other => {
+                unreachable!("only let/assign/expression statements can be for clauses: {other:?}")
+            }
+        }
+    }
+
     fn emit_block(&mut self, block: &Block) {
         self.enter_scope();
         for stmt in &block.statements {
@@ -268,6 +302,43 @@ impl CGenerator {
                 }
                 self.output.push('\n');
             }
+            Stmt::For {
+                init,
+                condition,
+                step,
+                body,
+                ..
+            } => {
+                self.indent_write();
+                self.output.push_str("for (");
+                if let Some(init) = init {
+                    self.emit_for_clause(init);
+                }
+                self.output.push_str("; ");
+                if let Some(cond) = condition {
+                    self.emit_expr(cond);
+                }
+                self.output.push_str("; ");
+                if let Some(step) = step {
+                    self.emit_for_clause(step);
+                }
+                self.output.push_str(") {\n");
+                self.indent += 1;
+                self.enter_scope();
+                self.emit_block(body);
+                self.exit_scope();
+                self.indent -= 1;
+                self.indent_write();
+                self.output.push_str("}\n");
+            }
+            Stmt::Break { .. } => {
+                self.indent_write();
+                self.output.push_str("break;\n");
+            }
+            Stmt::Continue { .. } => {
+                self.indent_write();
+                self.output.push_str("continue;\n");
+            }
             Stmt::While {
                 condition, body, ..
             } => {
@@ -392,11 +463,11 @@ impl CGenerator {
 
     fn op_to_c(op: &TokenKind) -> &'static str {
         match op {
-            TokenKind::Plus => "+",
-            TokenKind::Minus => "-",
-            TokenKind::Star => "*",
-            TokenKind::Slash => "/",
-            TokenKind::Percent => "%",
+            TokenKind::Plus | TokenKind::PlusEq => "+",
+            TokenKind::Minus | TokenKind::MinusEq => "-",
+            TokenKind::Star | TokenKind::StarEq => "*",
+            TokenKind::Slash | TokenKind::SlashEq => "/",
+            TokenKind::Percent | TokenKind::PercentEq => "%",
             TokenKind::EqEq => "==",
             TokenKind::BangEq => "!=",
             TokenKind::Less => "<",

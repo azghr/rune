@@ -228,6 +228,38 @@ fn errors_on_compound_assignment_to_immutable() {
 }
 
 #[test]
+fn break_and_continue_are_valid_inside_loops() {
+    analyze("fn main() { while true { break } }");
+    analyze("fn main() { while true { continue } }");
+    analyze("fn main() { for ;; { break } }");
+    analyze("fn main() { for ;; { continue } }");
+}
+
+#[test]
+fn break_and_continue_nest_to_the_innermost_loop() {
+    // both keywords inside the inner loop are fine, not an error
+    analyze("fn main() { while true { while true { break continue } break } }");
+}
+
+#[test]
+fn errors_on_break_outside_a_loop() {
+    let errs = analyze_errors("fn main() { break }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("`break` outside of a loop"))
+    );
+}
+
+#[test]
+fn errors_on_continue_outside_a_loop() {
+    let errs = analyze_errors("fn main() { continue }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("`continue` outside of a loop"))
+    );
+}
+
+#[test]
 fn collects_multiple_errors_across_statements() {
     let errs = analyze_errors("fn main() { let a: bool = 1 let b: int = true }");
     assert_eq!(errs.len(), 2);

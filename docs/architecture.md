@@ -80,10 +80,9 @@ A recursive-descent parser producing the AST defined in `src/language/ast.rs`.
 **Statements** (`stmt.rs`, `decl.rs`): function declarations, `let` and
 `let mut` bindings (with an optional `: type` annotation), plain and compound
 assignments (`+=` etc.), `if`/`else` (including `else if` chains, which
-desugar into a block wrapping the inner if), `while`, C-style `for` (pure
-sugar: it desugars into a block holding the initializer followed by a `while`
-whose body ends with the step, so no later stage knows `for` exists),
-`return`, blocks, and expression statements.
+desugar into a block wrapping the inner if), `while`, C-style `for` with
+optional clauses, `break`/`continue` (valid only inside loops; the checker
+tracks loop nesting depth), `return`, blocks, and expression statements.
 A value-less `return` is recognized by the next token not being able to start
 an expression, so no semicolon is required before `}`. Statements are terminated by an
 optional semicolon — a line break alone is enough, since the lexer discards
@@ -125,7 +124,8 @@ The type checker walks the AST top-down.
     types; the return type flows into the surrounding expression
   - `+` accepts two strings (concatenation) but rejects mixing strings and
     numbers; other arithmetic requires numbers
-  - `if`/`while` conditions are `bool`
+  - `if`/`while`/`for` conditions are `bool`
+  - `break` and `continue` appear only inside loops
   - `==`/`!=` accept same-type operands, including strings
 - Errors are collected in a list and reported together when checking finishes.
 
@@ -143,7 +143,11 @@ them.
   its result to a generated temp (`t0`, `t1`, …). Temp names are chosen to
   never collide with user variables.
 - `if` becomes a `Branch` to then/else blocks that jump to a shared merge
-  block; `while` becomes a condition block whose body jumps back to it.
+  block; `while` becomes a condition block whose body jumps back to it. The
+  lowering keeps a stack of loop targets so `break` lowers to a jump to the
+  loop's exit block and `continue` to the loop's continue target — the
+  condition block for `while`, the step block for `for` (matching C
+  semantics, where `continue` still runs the step clause).
 - `&&` and `||` lower to **short-circuit control flow**: the right operand is
   evaluated in its own block, reached only if the left operand allows it, so
   side effects behave exactly as they would in C.

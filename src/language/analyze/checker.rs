@@ -20,6 +20,8 @@ struct FunctionSignature {
 pub struct Analyzer {
     scopes: ScopeStack,
     current_return_type: Option<Type>,
+    /// Nesting depth of loops, for validating `break`/`continue`.
+    loop_depth: usize,
     functions: HashMap<String, FunctionSignature>,
     errors: Vec<Diagnostic>,
 }
@@ -35,6 +37,7 @@ impl Analyzer {
         Self {
             scopes: ScopeStack::new(),
             current_return_type: None,
+            loop_depth: 0,
             functions: HashMap::new(),
             errors: Vec::new(),
         }
@@ -274,7 +277,46 @@ impl Analyzer {
                 if !cond_ty.is_bool() {
                     self.error("condition must be `bool`", condition.span());
                 }
+                self.loop_depth += 1;
                 self.analyze_block(body);
+                self.loop_depth -= 1;
+            }
+            Stmt::For {
+                init,
+                condition,
+                step,
+                body,
+                ..
+            } => {
+                // init, condition, and step share one scope around the loop;
+                // the body gets its own (like C block scoping).
+                self.scopes.push();
+                if let Some(init) = init {
+                    self.analyze_stmt(init);
+                }
+                if let Some(cond) = condition {
+                    let cond_ty = self.analyze_expr(cond);
+                    if !cond_ty.is_bool() {
+                        self.error("condition must be `bool`", cond.span());
+                    }
+                }
+                if let Some(step) = step {
+                    self.analyze_stmt(step);
+                }
+                self.loop_depth += 1;
+                self.analyze_block(body);
+                self.loop_depth -= 1;
+                self.scopes.pop();
+            }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    self.error("`break` outside of a loop", *span);
+                }
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    self.error("`continue` outside of a loop", *span);
+                }
             }
             Stmt::Block(block) => self.analyze_block(block),
         }

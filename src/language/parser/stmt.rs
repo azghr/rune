@@ -43,6 +43,14 @@ impl Parser {
             self.parse_for()
         } else if self.matches(&[TokenKind::Return]) {
             self.parse_return()
+        } else if self.matches(&[TokenKind::Break]) {
+            let span = self.previous().span;
+            self.end_of_statement();
+            Ok(Stmt::Break { span })
+        } else if self.matches(&[TokenKind::Continue]) {
+            let span = self.previous().span;
+            self.end_of_statement();
+            Ok(Stmt::Continue { span })
         } else if self.matches(&[TokenKind::LBrace]) {
             let block = self.parse_block_after_lbrace()?;
             Ok(Stmt::Block(block))
@@ -143,13 +151,9 @@ impl Parser {
     /// for let mut i = 0; i < 10; i += 1 { body }
     /// ```
     ///
-    /// All three clauses are optional. The loop is desugared into a block
-    /// holding the initializer followed by a `while` whose body ends with
-    /// the step, so no other stage needs to know `for` exists:
-    ///
-    /// ```text
-    /// { init; while cond { body; step } }
-    /// ```
+    /// All three clauses are optional. The loop stays a distinct AST node
+    /// (rather than desugaring into `while`) so that `continue` can be
+    /// lowered to the step clause, matching C semantics.
     fn parse_for(&mut self) -> Result<Stmt, Diagnostic> {
         let start_span = self.previous().span;
 
@@ -179,30 +183,13 @@ impl Parser {
         self.consume(TokenKind::LBrace, "expected `{` after for clauses")?;
         let body = self.parse_block_after_lbrace()?;
 
-        let mut loop_body = body.statements;
-        if let Some(step) = step {
-            loop_body.push(step);
-        }
-        let mut statements = Vec::new();
-        if let Some(init) = init {
-            statements.push(init);
-        }
-        statements.push(Stmt::While {
-            condition: condition.unwrap_or(Expr::Bool {
-                value: true,
-                span: start_span,
-            }),
-            body: Block {
-                statements: loop_body,
-                span: body.span,
-            },
-            span: start_span.merge(body.span),
-        });
-
-        Ok(Stmt::Block(Block {
-            statements,
+        Ok(Stmt::For {
+            init: init.map(Box::new),
+            condition,
+            step: step.map(Box::new),
+            body,
             span: start_span.merge(self.previous().span),
-        }))
+        })
     }
 
     fn parse_while(&mut self) -> Result<Stmt, Diagnostic> {

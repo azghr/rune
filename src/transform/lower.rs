@@ -43,6 +43,8 @@ struct FuncBuilder {
     /// All variable names declared in the function, so generated temp names
     /// never collide with user variables.
     taken_names: HashSet<String>,
+    /// Innermost loop targets: (break target, continue target).
+    loops: Vec<(usize, usize)>,
 }
 
 impl FuncBuilder {
@@ -63,6 +65,7 @@ impl FuncBuilder {
             open: Some(0),
             next_temp: 0,
             taken_names,
+            loops: Vec::new(),
         }
     }
 
@@ -402,11 +405,70 @@ fn lower_statement(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, stmt: &
 
             builder.switch_to(body_id);
             lowerer.enter_scope();
+            builder.loops.push((exit_id, cond_id));
             lower_statements(builder, lowerer, &body.statements);
+            builder.loops.pop();
             lowerer.exit_scope();
             builder.jump_if_open(cond_id);
 
             builder.switch_to(exit_id);
+        }
+        Stmt::For {
+            init,
+            condition,
+            step,
+            body,
+            ..
+        } => {
+            // init, condition, and step share one scope around the loop.
+            lowerer.enter_scope();
+            if let Some(init) = init {
+                lower_statement(builder, lowerer, init);
+            }
+
+            let cond_id = builder.reserve_block();
+            builder.terminate(Terminator::Jump(cond_id));
+            builder.switch_to(cond_id);
+            let (cond, _) = match condition {
+                Some(cond) => lower_expr(builder, lowerer, cond),
+                None => (Value::ConstBool(true), Type::Bool),
+            };
+            let body_id = builder.reserve_block();
+            let step_id = builder.reserve_block();
+            let exit_id = builder.reserve_block();
+            builder.terminate(Terminator::Branch {
+                condition: cond,
+                then_block: body_id,
+                else_block: exit_id,
+            });
+
+            // `continue` runs the step before re-testing the condition,
+            // matching C semantics.
+            builder.switch_to(body_id);
+            lowerer.enter_scope();
+            builder.loops.push((exit_id, step_id));
+            lower_statements(builder, lowerer, &body.statements);
+            builder.loops.pop();
+            lowerer.exit_scope();
+            builder.jump_if_open(step_id);
+
+            builder.switch_to(step_id);
+            if let Some(step) = step {
+                lower_statement(builder, lowerer, step);
+            }
+            builder.jump_if_open(cond_id);
+
+            builder.switch_to(exit_id);
+            lowerer.exit_scope();
+        }
+        Stmt::Break { .. } => {
+            // The checker guarantees a loop is active.
+            let (break_target, _) = *builder.loops.last().unwrap();
+            builder.terminate(Terminator::Jump(break_target));
+        }
+        Stmt::Continue { .. } => {
+            let (_, continue_target) = *builder.loops.last().unwrap();
+            builder.terminate(Terminator::Jump(continue_target));
         }
         Stmt::Block(block) => {
             lowerer.enter_scope();
