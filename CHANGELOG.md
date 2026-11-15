@@ -51,8 +51,12 @@ when it is tagged.
 - `irdebug` binary: dumps the IR before and after each pass
 - Test suite (110 tests) across lexer, parser, checker, IR passes, codegen,
   and end-to-end binaries that compile with `gcc` and check output
-- CI on every push and PR: formatting, clippy, build, tests, and a
-  pipeline smoke test
+- `rune --wat`: a WebAssembly text-format backend emitting from the same
+  IR, with host imports for `print` (strings and function values are
+  rejected with clear errors for now)
+- CI on every push and PR: formatting, clippy, build, tests, a pipeline
+  smoke test, and a WASM job that validates the generated WAT with wabt and
+  executes fib in Node
 
 ### Fixed
 

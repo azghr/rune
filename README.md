@@ -35,6 +35,8 @@ and linked against a small C runtime.
 - Compiles through a typed three-address IR with constant folding (including
   branch elimination), unreachable-block removal, and liveness-based dead
   code elimination
+- Two backends: C (via `gcc`) and WebAssembly text format (`rune --wat`,
+  runnable in any WASM host)
 - Short-circuit `&&`/`||` lowered to real control flow, not eager evaluation
 - Written in Rust with zero external dependencies
 
@@ -106,7 +108,7 @@ More examples live in [`examples/`](examples).
 │   ├── language/      # lexer, parser, AST, type checker, scopes
 │   ├── diagnostics/   # diagnostics and source-context reporting
 │   ├── transform/     # AST-to-IR lowering, three-address IR, passes
-│   ├── emit/          # C emitters (from AST and from IR; LLVM/WASM are future targets)
+│   ├── emit/          # backends: C (AST and IR emitters) and WebAssembly (WAT)
 │   ├── driver/        # high-level compile pipeline
 │   └── shared/        # source files and spans
 ├── runtime/           # small C runtime linked into every binary
@@ -123,17 +125,10 @@ More examples live in [`examples/`](examples).
 
 ## Roadmap
 
-- [x] Lexer, parser, and AST
-- [x] Type checker with lexical scopes
-- [x] Three-address IR with constant folding and dead code elimination
-- [x] C code generation with a small runtime
-- [x] Integration tests and a real test suite (103 tests across lexer,
-      parser, checker, IR passes, codegen, and end-to-end binaries)
-- [x] IR optimization passes wired into the pipeline: constant folding,
-      branch elimination, liveness-based dead code elimination
 - [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
-- [ ] Functions as values / closures
-- [ ] LLVM or WASM backend
+- [ ] Closures with captured environments
+- [ ] Strings and function values in the WASM backend
+- [ ] LLVM backend
 
 ## Contributing
 

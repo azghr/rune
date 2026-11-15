@@ -203,6 +203,24 @@ described below.
 - Expressions become parenthesized C expressions; `if`/`while` become C
   control flow with generated blocks.
 
+## Alternative backend: WebAssembly (`src/emit/wasm.rs`)
+
+`rune --wat file.rune` emits the WebAssembly **text format** from the same IR
+module the C emitter consumes — the IR proving itself as a backend-agnostic
+representation.
+
+- `int` maps to `i64`, `bool` to `i32`.
+- WASM has no goto, so the CFG is compiled into a **dispatch loop**: every
+  block becomes a case in a `br_table`, and each terminator sets a dispatch
+  register (`$rune_pc`) and restarts the loop. This is correct for arbitrary
+  control-flow graphs without a relooping pass.
+- `print` is provided by host imports (`rune.print_int` / `rune.print_bool`);
+  hosts embed the module and supply the functions.
+- Strings and function values are rejected with clear errors (WASM has no
+  native strings, and function references need the reference-types proposal).
+- Validate output with `wat2wasm` (wabt); CI compiles and _executes_ the
+  generated module in Node, verifying fib's output.
+
 ## Runtime (`runtime/`)
 
 `rune_rt.c` / `rune_rt.h` are a handful of small C functions linked into every
