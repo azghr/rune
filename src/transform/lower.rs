@@ -15,11 +15,20 @@ use std::collections::{HashMap, HashSet};
 
 /// Lowers a checked `Program` into an IR `Module`.
 pub fn lower_program(program: &Program) -> Module {
-    // Return types of every declared function, used to type call expressions.
+    // The function type of every declared function, used to type call
+    // expressions and function references.
     let functions: HashMap<String, Type> = program
         .functions
         .iter()
-        .map(|f| (f.name.clone(), f.return_type.clone().unwrap_or(Type::Void)))
+        .map(|f| {
+            (
+                f.name.clone(),
+                Type::Function {
+                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                    return_type: Box::new(f.return_type.clone().unwrap_or(Type::Void)),
+                },
+            )
+        })
         .collect();
 
     let functions = program
@@ -240,15 +249,35 @@ impl ExprLowerer {
             .unwrap_or(Type::Int)
     }
 
+    /// The type of a name in expression position: a local variable, or a
+    /// declared function (yielding its full function type).
+    fn var_type_or_fn(&self, name: &str) -> Type {
+        if let Some(ty) = self.scopes.iter().rev().find_map(|s| s.get(name).cloned()) {
+            return ty;
+        }
+        self.function_returns
+            .get(name)
+            .cloned()
+            .unwrap_or(Type::Int)
+    }
+
     fn call_type(&self, callee: &str) -> Type {
         if callee == "print" {
-            Type::Void
-        } else {
-            self.function_returns
-                .get(callee)
-                .cloned()
-                .unwrap_or(Type::Int)
+            return Type::Void;
         }
+        // Calling through a function-typed local returns its return type.
+        if let Some(Type::Function { return_type, .. }) = self
+            .scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.get(callee).cloned())
+        {
+            return *return_type;
+        }
+        if let Some(Type::Function { return_type, .. }) = self.function_returns.get(callee) {
+            return *return_type.clone();
+        }
+        Type::Int
     }
 }
 
@@ -483,7 +512,10 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
         Expr::Int { value, .. } => (Value::ConstInt(*value), Type::Int),
         Expr::Bool { value, .. } => (Value::ConstBool(*value), Type::Bool),
         Expr::String { value, .. } => (Value::ConstString(value.clone()), Type::String),
-        Expr::Variable { name, .. } => (Value::Local(name.clone()), lowerer.var_type(name)),
+        Expr::Variable { name, .. } => {
+            let ty = lowerer.var_type_or_fn(name);
+            (Value::Local(name.clone()), ty)
+        }
         Expr::Grouping { expr, .. } => lower_expr(builder, lowerer, expr),
         Expr::Unary {
             op, expr: inner, ..
@@ -620,12 +652,28 @@ fn lower_call(
         None
     };
 
-    builder.push(Instruction::Call {
-        dest: dest.clone(),
-        name: callee.clone(),
-        args: values,
-        ty: ty.clone(),
-    });
+    // A local holding a function value is an indirect call; a declared
+    // function is a direct one.
+    let callee_is_local = callee != "print"
+        && lowerer.scopes.iter().rev().any(|s| {
+            s.get(callee)
+                .is_some_and(|ty| matches!(ty, Type::Function { .. }))
+        });
+    if callee_is_local {
+        builder.push(Instruction::CallIndirect {
+            dest: dest.clone(),
+            callee: Value::Local(callee.clone()),
+            args: values,
+            ty: ty.clone(),
+        });
+    } else {
+        builder.push(Instruction::Call {
+            dest: dest.clone(),
+            name: callee.clone(),
+            args: values,
+            ty: ty.clone(),
+        });
+    }
     match dest {
         Some(d) => (Value::Local(d), ty),
         // The checker never lets a void call appear in value position; this

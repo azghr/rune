@@ -121,10 +121,16 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Int,
     Bool,
     String,
     Void,
+    /// A function type, written `fn(param, ...) -> ret`. Enables passing
+    /// functions as values.
+    Function {
+        params: Vec<Type>,
+        return_type: Box<Type>,
+    },
 }

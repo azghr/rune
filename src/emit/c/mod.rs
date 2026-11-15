@@ -2,6 +2,7 @@
 
 //! C backend for Rune.
 
+pub mod ctype;
 pub mod generator;
 pub mod ir;
 

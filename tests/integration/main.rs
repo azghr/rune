@@ -303,6 +303,38 @@ fn reassigning_from_a_call_beats_constant_propagation() {
 }
 
 #[test]
+fn functions_are_first_class_values_end_to_end() {
+    let out = run_program(
+        "fn apply(f: fn(int) -> int, x: int) -> int {
+            return f(x)
+        }
+        fn twice(n: int) -> int {
+            return n * 2
+        }
+        fn triple(n: int) -> int {
+            return n * 3
+        }
+        fn pick(big: bool) -> fn(int) -> int {
+            if big {
+                return triple
+            }
+            return twice
+        }
+        fn main() {
+            let f = twice
+            print(f(5))
+            print(apply(twice, 10))
+            print(apply(triple, 10))
+            let g = pick(true)
+            print(g(4))
+            let h = pick(false)
+            print(h(4))
+        }",
+    );
+    assert_eq!(out, "10\n20\n30\n12\n8\n");
+}
+
+#[test]
 fn string_escapes_round_trip_through_generated_c() {
     // the lexer decodes escapes; the emitters must re-encode them or the
     // generated C is not even valid

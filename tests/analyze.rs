@@ -167,7 +167,7 @@ fn errors_on_printing_void() {
     let errs = analyze_errors("fn f() { print(1) } fn main() { print(f()) }");
     assert!(
         errs.iter()
-            .any(|e| e.message.contains("cannot print a `void` value"))
+            .any(|e| e.message.contains("cannot print a value of type `void`"))
     );
 }
 
@@ -256,6 +256,52 @@ fn errors_on_continue_outside_a_loop() {
     assert!(
         errs.iter()
             .any(|e| e.message.contains("`continue` outside of a loop"))
+    );
+}
+
+#[test]
+fn functions_are_first_class_values() {
+    // references, fn-typed parameters, and fn-typed returns all check
+    analyze(
+        "fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+        fn twice(n: int) -> int { return n * 2 }
+        fn main() {
+            let f = twice
+            print(f(3))
+            print(apply(twice, 4))
+        }",
+    );
+}
+
+#[test]
+fn errors_on_calling_a_function_value_with_wrong_args() {
+    let errs = analyze_errors(
+        "fn twice(n: int) -> int { return n * 2 } fn main() { let f = twice f(1, 2) }",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("expects 1 argument(s), found 2"))
+    );
+}
+
+#[test]
+fn errors_on_fn_type_mismatch() {
+    let errs = analyze_errors(
+        "fn twice(n: int) -> int { return n * 2 } fn main() { let f: fn(int) -> int = 1 }",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("expected `fn(int) -> int`"))
+    );
+}
+
+#[test]
+fn errors_on_printing_a_function_value() {
+    let errs =
+        analyze_errors("fn twice(n: int) -> int { return n * 2 } fn main() { print(twice) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot print a value of type"))
     );
 }
 

@@ -32,29 +32,24 @@ pub fn generate(module: &Module) -> String {
     out
 }
 
-fn c_type_name(ty: &Type) -> &'static str {
-    match ty {
-        Type::Int => "int64_t",
-        Type::Bool => "bool",
-        Type::String => "const char*",
-        Type::Void => "void",
-    }
-}
-
 fn signature(func: &Function) -> String {
-    let ret = if func.name == "main" {
+    if func.name == "main" {
         // C requires `main` to return `int`
-        "int"
-    } else {
-        c_type_name(&func.return_type)
-    };
+        let params = func
+            .params
+            .iter()
+            .map(|(name, ty)| super::ctype::c_decl(ty, name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!("int main({})", params);
+    }
     let params = func
         .params
         .iter()
-        .map(|(name, ty)| format!("{} {}", c_type_name(ty), name))
+        .map(|(name, ty)| super::ctype::c_decl(ty, name))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("{} {}({})", ret, func.name, params)
+    super::ctype::c_signature(&func.return_type, &format!("{}({})", func.name, params))
 }
 
 /// Collects the type of every local (variable or temp) declared by the
@@ -75,8 +70,14 @@ fn local_types(func: &Function) -> HashMap<&str, Type> {
                     dest: Some(dest),
                     ty,
                     ..
+                }
+                | Instruction::CallIndirect {
+                    dest: Some(dest),
+                    ty,
+                    ..
                 } => (dest.as_str(), ty.clone()),
-                Instruction::Call { dest: None, .. } => continue,
+                Instruction::Call { dest: None, .. }
+                | Instruction::CallIndirect { dest: None, .. } => continue,
             };
             types.entry(dest).or_insert(ty);
         }
@@ -103,7 +104,7 @@ fn emit_function(out: &mut String, func: &Function) {
     let param_names: Vec<&str> = func.params.iter().map(|(n, _)| n.as_str()).collect();
     for (name, ty) in &types {
         if !param_names.contains(name) {
-            let _ = writeln!(out, "    {} {};", c_type_name(ty), name);
+            let _ = writeln!(out, "    {};", super::ctype::c_decl(ty, name));
         }
     }
 
@@ -208,6 +209,25 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
                 let _ = write!(out, "{} = ", dest);
             }
             emit_call(out, name, args, types);
+            out.push_str(";\n");
+        }
+        Instruction::CallIndirect {
+            dest, callee, args, ..
+        } => {
+            if let Some(dest) = dest {
+                let _ = write!(out, "{} = ", dest);
+            }
+            // In C, calling through a function pointer uses the same
+            // syntax as a direct call.
+            emit_value(out, callee);
+            out.push('(');
+            for (i, arg) in args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                emit_value(out, arg);
+            }
+            out.push(')');
             out.push_str(";\n");
         }
     }

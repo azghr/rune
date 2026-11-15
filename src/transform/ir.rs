@@ -57,6 +57,13 @@ pub enum Instruction {
         args: Vec<Value>,
         ty: Type,
     },
+    /// dest = callee(args...), calling through a function value
+    CallIndirect {
+        dest: Option<String>,
+        callee: Value,
+        args: Vec<Value>,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone)]

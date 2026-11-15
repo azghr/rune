@@ -330,6 +330,12 @@ impl Analyzer {
             Expr::Variable { name, span } => {
                 if let Some(sym) = self.scopes.resolve(name) {
                     sym.ty.clone()
+                } else if let Some(sig) = self.functions.get(name) {
+                    // A function name used as a value: a function reference.
+                    Type::Function {
+                        params: sig.params.clone(),
+                        return_type: Box::new(sig.return_type.clone()),
+                    }
                 } else {
                     self.error(format!("undefined variable `{}`", name), *span);
                     Type::Int // recovery
@@ -422,11 +428,60 @@ impl Analyzer {
                             self.error("print takes exactly one argument", *span);
                         } else {
                             let arg_ty = self.analyze_expr(&args[0]);
-                            if arg_ty == Type::Void {
-                                self.error("cannot print a `void` value", *span);
+                            if !matches!(arg_ty, Type::Int | Type::Bool | Type::String) {
+                                self.error(
+                                    format!(
+                                        "cannot print a value of type `{}`",
+                                        type_name(&arg_ty)
+                                    ),
+                                    *span,
+                                );
                             }
                         }
                         Type::Void
+                    }
+                    // Calling through a local holding a function value.
+                    name if self
+                        .scopes
+                        .resolve(name)
+                        .is_some_and(|sym| matches!(sym.ty, Type::Function { .. })) =>
+                    {
+                        let ty = self.scopes.resolve(name).unwrap().ty.clone();
+                        let Type::Function {
+                            params,
+                            return_type,
+                        } = ty
+                        else {
+                            unreachable!("filtered above");
+                        };
+                        if args.len() != params.len() {
+                            self.error(
+                                format!(
+                                    "function `{}` expects {} argument(s), found {}",
+                                    name,
+                                    params.len(),
+                                    args.len()
+                                ),
+                                *span,
+                            );
+                        }
+                        for (arg, param_ty) in args.iter().zip(&params) {
+                            let arg_ty = self.analyze_expr(arg);
+                            if arg_ty != *param_ty {
+                                self.error(
+                                    format!(
+                                        "argument type mismatch: expected `{}`, found `{}`",
+                                        type_name(param_ty),
+                                        type_name(&arg_ty)
+                                    ),
+                                    arg.span(),
+                                );
+                            }
+                        }
+                        for arg in args.iter().skip(params.len()) {
+                            self.analyze_expr(arg);
+                        }
+                        *return_type
                     }
                     name => match self.functions.get(name).cloned() {
                         Some(signature) => {
@@ -478,11 +533,6 @@ impl Analyzer {
     }
 }
 
-fn type_name(ty: &Type) -> &'static str {
-    match ty {
-        Type::Int => "int",
-        Type::Bool => "bool",
-        Type::String => "string",
-        Type::Void => "void",
-    }
+fn type_name(ty: &Type) -> String {
+    crate::language::analyze::types::type_name(ty)
 }

@@ -39,7 +39,10 @@ impl CGenerator {
         for func in &program.functions {
             self.function_returns.insert(
                 func.name.clone(),
-                func.return_type.clone().unwrap_or(Type::Void),
+                Type::Function {
+                    params: func.params.iter().map(|p| p.ty.clone()).collect(),
+                    return_type: Box::new(func.return_type.clone().unwrap_or(Type::Void)),
+                },
             );
         }
         self.emit_headers();
@@ -67,29 +70,29 @@ impl CGenerator {
 
     /// Builds the C signature (return type, name, parameters) for a function.
     fn signature(&self, func: &Function) -> String {
-        let ret = if func.name == "main" {
+        if func.name == "main" {
             // C requires `main` to return `int`
-            "int"
-        } else {
-            match &func.return_type {
-                Some(Type::Int) => "int64_t",
-                Some(Type::Bool) => "bool",
-                Some(Type::String) => "const char*",
-                Some(Type::Void) | None => "void",
+            let mut sig = String::from("int main(");
+            for (i, param) in func.params.iter().enumerate() {
+                if i > 0 {
+                    sig.push_str(", ");
+                }
+                sig.push_str(&super::ctype::c_decl(&param.ty, &param.name));
             }
-        };
-
-        let mut sig = format!("{} {}(", ret, func.name);
-
-        for (i, param) in func.params.iter().enumerate() {
-            if i > 0 {
-                sig.push_str(", ");
-            }
-            sig.push_str(&format!("{} {}", Self::c_type_name(&param.ty), param.name));
+            sig.push(')');
+            return sig;
         }
 
-        sig.push(')');
-        sig
+        let params = func
+            .params
+            .iter()
+            .map(|p| super::ctype::c_decl(&p.ty, &p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        super::ctype::c_signature(
+            &func.return_type.clone().unwrap_or(Type::Void),
+            &format!("{}({})", func.name, params),
+        )
     }
 
     fn emit_function(&mut self, func: &Function) {
@@ -121,7 +124,7 @@ impl CGenerator {
             Stmt::Let { name, value, .. } => {
                 let ty = self.infer_type(value);
                 self.declare_var(name, ty.clone());
-                write!(self.output, "{} {} = ", Self::c_type_name(&ty), name).unwrap();
+                write!(self.output, "{} = ", super::ctype::c_decl(&ty, name)).unwrap();
                 self.emit_expr(value);
             }
             Stmt::Assign {
@@ -177,16 +180,6 @@ impl CGenerator {
             .find_map(|scope| scope.get(name).cloned())
     }
 
-    /// Maps a Rune type to its C equivalent.
-    fn c_type_name(ty: &Type) -> &'static str {
-        match ty {
-            Type::Int => "int64_t",
-            Type::Bool => "bool",
-            Type::String => "const char*",
-            Type::Void => "void",
-        }
-    }
-
     /// Infers the static type of an expression during emission. The checker
     /// guarantees the program is well-typed, so the fallbacks here only guard
     /// against internal mistakes.
@@ -195,7 +188,16 @@ impl CGenerator {
             Expr::Int { .. } => Type::Int,
             Expr::Bool { .. } => Type::Bool,
             Expr::String { .. } => Type::String,
-            Expr::Variable { name, .. } => self.var_type(name).unwrap_or(Type::Int),
+            Expr::Variable { name, .. } => {
+                // A declared function used as a value has its function type.
+                if let Some(ty) = self.var_type(name) {
+                    ty
+                } else if let Some(ty) = self.function_returns.get(name) {
+                    ty.clone()
+                } else {
+                    Type::Int
+                }
+            }
             Expr::Grouping { expr, .. } => self.infer_type(expr),
             Expr::Unary { op, .. } => match op {
                 TokenKind::Minus => Type::Int,
@@ -221,6 +223,9 @@ impl CGenerator {
             Expr::Call { callee, .. } => {
                 if callee == "print" {
                     Type::Void
+                } else if let Some(Type::Function { return_type, .. }) = self.var_type(callee) {
+                    // calling through a function-typed local
+                    *return_type
                 } else {
                     self.function_returns
                         .get(callee)
@@ -237,7 +242,7 @@ impl CGenerator {
                 let ty = self.infer_type(value);
                 self.declare_var(name, ty.clone());
                 self.indent_write();
-                write!(self.output, "{} {} = ", Self::c_type_name(&ty), name).unwrap();
+                write!(self.output, "{} = ", super::ctype::c_decl(&ty, name)).unwrap();
                 self.emit_expr(value);
                 self.output.push_str(";\n");
             }

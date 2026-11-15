@@ -240,6 +240,30 @@ impl Parser {
             TokenKind::IntType => Ok(crate::language::ast::Type::Int),
             TokenKind::Bool => Ok(crate::language::ast::Type::Bool),
             TokenKind::StringType => Ok(crate::language::ast::Type::String),
+            TokenKind::Fn => {
+                // Function type: fn(param, ...) -> ret (the arrow clause is
+                // optional and defaults to void).
+                self.consume(TokenKind::LParen, "expected `(` after `fn` in type")?;
+                let mut params = Vec::new();
+                if !self.check(&TokenKind::RParen) {
+                    loop {
+                        params.push(self.parse_type()?);
+                        if !self.matches(&[TokenKind::Comma]) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(TokenKind::RParen, "expected `)` after fn type parameters")?;
+                let return_type = if self.matches(&[TokenKind::Arrow]) {
+                    self.parse_type()?
+                } else {
+                    crate::language::ast::Type::Void
+                };
+                Ok(crate::language::ast::Type::Function {
+                    params,
+                    return_type: Box::new(return_type),
+                })
+            }
             _ => Err(Diagnostic::error("expected type name", tok.span)),
         }
     }

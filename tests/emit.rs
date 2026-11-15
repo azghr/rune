@@ -89,6 +89,21 @@ fn string_equality_is_emitted_as_strcmp() {
 }
 
 #[test]
+fn function_values_become_c_function_pointers() {
+    let c = generate(
+        "fn twice(n: int) -> int { return n * 2 }
+        fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+        fn main() { let f = twice print(apply(f, 5)) }",
+    );
+    // fn-typed parameter uses pointer declarator syntax
+    assert!(c.contains("int64_t apply(int64_t (*f)(int64_t), int64_t x)"));
+    // fn-typed local too
+    assert!(c.contains("int64_t (*f)(int64_t) = twice;"));
+    // calling through it uses ordinary call syntax
+    assert!(c.contains("f(x)"));
+}
+
+#[test]
 fn for_loops_become_c_for_loops() {
     let c = generate("fn main() { for let mut i = 0; i < 3; i += 1 { print(i) } }");
     assert!(c.contains("for (int64_t i = 0; (i < 3); i += 1) {"));

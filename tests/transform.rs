@@ -399,6 +399,27 @@ fn continue_in_for_runs_the_step_clause() {
 }
 
 #[test]
+fn calls_through_function_values_lower_to_call_indirect() {
+    let module =
+        lowered("fn twice(n: int) -> int { return n * 2 } fn main() { let f = twice print(f(3)) }");
+    let main = module.functions.last().unwrap();
+    let insts: Vec<&Instruction> = main
+        .body
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .collect();
+    assert!(insts.iter().any(
+        |i| matches!(i, Instruction::CallIndirect { callee: Value::Local(n), .. } if n == "f")
+    ));
+    // binding a function reference is a Move of the function's name
+    assert!(insts.iter().any(|i| matches!(
+        i,
+        Instruction::Move { dest, value: Value::Local(v), ty: Type::Function { .. } }
+            if dest == "f" && v == "twice"
+    )));
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

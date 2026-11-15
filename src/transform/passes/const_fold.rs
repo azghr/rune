@@ -99,7 +99,7 @@ impl ConstFold {
                     }
                 }
                 // Calls can have side effects; leave them alone.
-                Instruction::Call { .. } => {}
+                Instruction::Call { .. } | Instruction::CallIndirect { .. } => {}
             }
         }
 
