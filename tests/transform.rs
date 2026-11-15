@@ -5,6 +5,7 @@
 mod common;
 
 use common::analyze;
+use rune::language::Type;
 use rune::transform::ir::*;
 use rune::transform::{ConstFold, DeadCodeElim, lower_program};
 
@@ -251,6 +252,34 @@ fn unused_temp_chains_are_fully_removed_by_liveness() {
             .iter()
             .all(|i| !matches!(i, Instruction::Binary { dest, .. } if dest == "dead"))
     );
+}
+
+#[test]
+fn string_concatenation_keeps_string_type_in_ir() {
+    let module = lowered("fn main() { let x = \"a\" + \"b\" print(x) }");
+    let main = &module.functions[0];
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::Binary {
+            op: BinOp::Add,
+            ty: Type::String,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn comparing_a_concatenation_yields_bool_in_ir() {
+    let module = lowered("fn main() { print(\"a\" + \"b\" == \"ab\") }");
+    let main = &module.functions[0];
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::Binary {
+            op: BinOp::Eq,
+            ty: Type::Bool,
+            ..
+        }
+    )));
 }
 
 #[test]

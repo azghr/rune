@@ -119,6 +119,8 @@ The type checker walks the AST top-down.
     not `void`
   - calls resolve to a declared function with matching argument count and
     types; the return type flows into the surrounding expression
+  - `+` accepts two strings (concatenation) but rejects mixing strings and
+    numbers; other arithmetic requires numbers
   - `if`/`while` conditions are `bool`
   - `==`/`!=` accept same-type operands, including strings
 - Errors are collected in a list and reported together when checking finishes.
@@ -168,10 +170,10 @@ Two emitters exist:
 label; `Branch` becomes `if (cond) goto L_then;` / `goto L_else;`. All locals
 and temps are declared at the top of the function with their C types, and
 `print` dispatches to the right runtime function using the locals' recorded
-types, and string `==`/`!=` become `strcmp` comparisons (a raw C `==` on
-`const char*` would compare pointers, not contents). The output is less
-readable than the AST emitter's, but it reflects exactly what the transform
-passes produced.
+types; string `==`/`!=` become `strcmp` comparisons (a raw C `==` on
+`const char*` would compare pointers, not contents), and string `+` becomes
+a call to the runtime's `rune_strcat`. The output is less readable than the
+AST emitter's, but it reflects exactly what the transform passes produced.
 
 **`generator.rs` — AST to C (reference).** The original direct emitter,
 described below.
@@ -196,7 +198,10 @@ described below.
 ## Runtime (`runtime/`)
 
 `rune_rt.c` / `rune_rt.h` are a handful of small C functions linked into every
-built program. Today they only implement printing; the CLI compiles with:
+built program: the `rune_print_*` functions and `rune_strcat` (string
+concatenation). Concatenation results are heap-allocated and never freed —
+Rune does not track string ownership, so the compiler currently leaks
+concatenated strings by design. The CLI compiles with:
 
 ```
 gcc output.c runtime/rune_rt.c -o output -I.
@@ -225,8 +230,9 @@ emitters read the same `Module` the C emitter does.
 
 ## Current Limitations
 
-- No first-class strings, arrays, or structs (strings can be compared but
-  not concatenated or stored in containers)
+- No first-class strings, arrays, or structs (strings support comparison
+  and concatenation, but cannot be stored in containers; concatenation
+  results are leaked by design — see the runtime section)
 - No functions-as-values or closures
 - `DeadCodeElim` uses a function-global used-set, so dead stores whose
   variables are read _somewhere_ are kept; a precise liveness analysis would

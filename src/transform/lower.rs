@@ -426,9 +426,23 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
                 return (result, Type::Bool);
             }
 
-            let (left, _) = lower_expr(builder, lowerer, left);
-            let (right, _) = lower_expr(builder, lowerer, right);
-            let ty = bin_op_result(op);
+            let (left, left_ty) = lower_expr(builder, lowerer, left);
+            let (right, right_ty) = lower_expr(builder, lowerer, right);
+            // `+` on strings is concatenation and yields a string;
+            // comparisons always yield bools.
+            let ty = if matches!(
+                op,
+                TokenKind::Plus
+                    | TokenKind::Minus
+                    | TokenKind::Star
+                    | TokenKind::Slash
+                    | TokenKind::Percent
+            ) && (left_ty == Type::String || right_ty == Type::String)
+            {
+                Type::String
+            } else {
+                bin_op_result(op)
+            };
             let dest = builder.fresh_temp();
             builder.push(Instruction::Binary {
                 dest: dest.clone(),

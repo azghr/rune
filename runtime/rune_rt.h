@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+const char *rune_strcat(const char *a, const char *b);
+
 void rune_print_int(int64_t value);
 void rune_print_bool(bool value);
 void rune_print_string(const char *value);

@@ -167,7 +167,16 @@ impl CGenerator {
                 TokenKind::Minus => Type::Int,
                 _ => Type::Bool,
             },
-            Expr::Binary { op, .. } => match op {
+            Expr::Binary {
+                op, left, right, ..
+            } => match op {
+                TokenKind::Plus
+                    if self.infer_type(left) == Type::String
+                        || self.infer_type(right) == Type::String =>
+                {
+                    // `+` on strings is concatenation.
+                    Type::String
+                }
                 TokenKind::Plus
                 | TokenKind::Minus
                 | TokenKind::Star
@@ -277,6 +286,19 @@ impl CGenerator {
             Expr::Binary {
                 left, op, right, ..
             } => {
+                if *op == TokenKind::Plus
+                    && (self.infer_type(left) == Type::String
+                        || self.infer_type(right) == Type::String)
+                {
+                    // Concatenation goes through the runtime helper.
+                    self.output.push_str("(rune_strcat(");
+                    self.emit_expr(left);
+                    self.output.push_str(", ");
+                    self.emit_expr(right);
+                    self.output.push_str("))");
+                    return;
+                }
+
                 // String equality compares contents via strcmp; == on the C
                 // side would compare pointers.
                 if matches!(op, TokenKind::EqEq | TokenKind::BangEq)

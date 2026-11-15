@@ -155,15 +155,24 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             left,
             op,
             right,
+            ty,
             ..
         } => {
             let _ = write!(out, "{} = ", dest);
-            // String equality compares contents via strcmp; == on the C
-            // side would compare pointers.
-            if matches!(op, BinOp::Eq | BinOp::NotEq)
+            if *op == BinOp::Add && *ty == Type::String {
+                // Concatenation goes through the runtime helper; the result
+                // is heap-allocated and never freed (see rune_rt.c).
+                out.push_str("rune_strcat(");
+                emit_value(out, left);
+                out.push_str(", ");
+                emit_value(out, right);
+                out.push(')');
+            } else if matches!(op, BinOp::Eq | BinOp::NotEq)
                 && (value_type(left, types) == Type::String
                     || value_type(right, types) == Type::String)
             {
+                // String equality compares contents via strcmp; == on the C
+                // side would compare pointers.
                 let cmp = match op {
                     BinOp::Eq => "== 0",
                     _ => "!= 0",

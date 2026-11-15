@@ -242,6 +242,17 @@ impl Analyzer {
                     | TokenKind::Percent => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             Type::Int
+                        } else if *op == TokenKind::Plus
+                            && left_ty == Type::String
+                            && right_ty == Type::String
+                        {
+                            // Concatenation, compiled to rune_strcat.
+                            Type::String
+                        } else if *op == TokenKind::Plus
+                            && (left_ty == Type::String || right_ty == Type::String)
+                        {
+                            self.error("cannot mix strings and numbers", *span);
+                            Type::String
                         } else {
                             self.error("operands must be numbers", *span);
                             Type::Int

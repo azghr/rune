@@ -28,6 +28,7 @@ and linked against a small C runtime.
 - Logical operators (`&&`, `||`) with correct precedence
 - Immutability by default: only `mut` variables can be reassigned
 - String comparison with `==`/`!=` compares contents
+- String concatenation with `+` (backed by a small C runtime helper)
 - Lexical scoping with a scope stack and symbol tables
 - Span-based diagnostics with source-context reporting
 - Compiles through a typed three-address IR with constant folding (including

@@ -126,6 +126,25 @@ fn else_if_chains_evaluate_correctly() {
 }
 
 #[test]
+fn string_concatenation_works_end_to_end() {
+    let out = run_program(
+        "fn main() {
+            let greeting = \"hello, \"
+            let name = \"rune\"
+            print(greeting + name)
+            print(\"a\" + \"b\" + \"c\")
+            if greeting + name == \"hello, rune\" {
+                print(1)
+            }
+            if \"ab\" != \"a\" + \"b\" {
+                print(2)
+            }
+        }",
+    );
+    assert_eq!(out, "hello, rune\nabc\n1\n");
+}
+
+#[test]
 fn string_comparison_compares_contents() {
     let out = run_program(
         "fn main() {

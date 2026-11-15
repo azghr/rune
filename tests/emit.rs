@@ -89,6 +89,14 @@ fn string_equality_is_emitted_as_strcmp() {
 }
 
 #[test]
+fn string_concatenation_is_emitted_as_rune_strcat() {
+    let c = generate("fn main() { let a = \"x\" print(a + \"y\") print(\"a\" + \"b\" == \"ab\") }");
+    assert!(c.contains("rune_strcat(a, \"y\")"));
+    assert!(c.contains("rune_print_string"));
+    assert!(c.contains("strcmp("));
+}
+
+#[test]
 fn emits_if_else_and_while_as_c_control_flow() {
     let c = generate(
         "fn main() {

@@ -172,6 +172,29 @@ fn errors_on_printing_void() {
 }
 
 #[test]
+fn string_concatenation_is_accepted() {
+    analyze("fn main() { print(\"a\" + \"b\") let x = \"a\" + \"b\" print(x) }");
+}
+
+#[test]
+fn errors_on_mixed_string_and_number_concatenation() {
+    let errs = analyze_errors("fn main() { let x = \"a\" + 1 }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot mix strings and numbers"))
+    );
+}
+
+#[test]
+fn errors_on_string_arithmetic() {
+    let errs = analyze_errors("fn main() { let x = \"a\" - \"b\" }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("operands must be numbers"))
+    );
+}
+
+#[test]
 fn collects_multiple_errors_across_statements() {
     let errs = analyze_errors("fn main() { let a: bool = 1 let b: int = true }");
     assert_eq!(errs.len(), 2);
