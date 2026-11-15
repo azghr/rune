@@ -48,28 +48,51 @@ impl<'a> Lexer<'a> {
             '"' => self.lex_string(start)?,
             '+' => {
                 self.advance();
-                TokenKind::Plus
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::PlusEq
+                } else {
+                    TokenKind::Plus
+                }
             }
             '-' => {
                 self.advance();
                 if self.current_char() == '>' {
                     self.advance();
                     TokenKind::Arrow
+                } else if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::MinusEq
                 } else {
                     TokenKind::Minus
                 }
             }
             '*' => {
                 self.advance();
-                TokenKind::Star
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::StarEq
+                } else {
+                    TokenKind::Star
+                }
             }
             '/' => {
                 self.advance();
-                TokenKind::Slash
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::SlashEq
+                } else {
+                    TokenKind::Slash
+                }
             }
             '%' => {
                 self.advance();
-                TokenKind::Percent
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::PercentEq
+                } else {
+                    TokenKind::Percent
+                }
             }
             '=' => {
                 self.advance();
@@ -181,6 +204,7 @@ impl<'a> Lexer<'a> {
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
+            "for" => TokenKind::For,
             "return" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,

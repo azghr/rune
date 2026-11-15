@@ -101,6 +101,28 @@ fn lexes_two_char_operators_as_single_tokens() {
 }
 
 #[test]
+fn lexes_compound_assignment_operators() {
+    let kinds: Vec<TokenKind> = tokens("+= -= *= /= %=")
+        .into_iter()
+        .filter(|t| t.kind != TokenKind::Eof)
+        .map(|t| t.kind)
+        .collect();
+    let expected = [
+        TokenKind::PlusEq,
+        TokenKind::MinusEq,
+        TokenKind::StarEq,
+        TokenKind::SlashEq,
+        TokenKind::PercentEq,
+    ];
+    assert_eq!(kinds, expected);
+}
+
+#[test]
+fn lexes_the_for_keyword() {
+    assert_eq!(tokens("for")[0].kind, TokenKind::For);
+}
+
+#[test]
 fn skips_comments() {
     let kinds: Vec<TokenKind> = tokens("// full line comment\n42 // trailing\n")
         .into_iter()

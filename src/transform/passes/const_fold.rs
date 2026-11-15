@@ -71,6 +71,10 @@ impl ConstFold {
                     let dest = dest.clone();
                     if let Some(v) = Self::const_value(inst) {
                         constants.insert(dest, v);
+                    } else {
+                        // A non-constant store invalidates any earlier
+                        // constant known for the destination.
+                        constants.remove(&dest);
                     }
                 }
                 Instruction::Unary {

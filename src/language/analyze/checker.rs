@@ -135,7 +135,12 @@ impl Analyzer {
                     self.error(msg, *span);
                 }
             }
-            Stmt::Assign { name, value, span } => {
+            Stmt::Assign {
+                name,
+                op: TokenKind::Eq,
+                value,
+                span,
+            } => {
                 let sym = match self.scopes.resolve(name) {
                     Some(sym) => sym.clone(),
                     None => {
@@ -162,6 +167,69 @@ impl Analyzer {
                         *span,
                     );
                 }
+            }
+            Stmt::Assign {
+                name,
+                op: compound_op,
+                value,
+                span,
+            } => {
+                let sym = match self.scopes.resolve(name) {
+                    Some(sym) => sym.clone(),
+                    None => {
+                        self.error(format!("undefined variable `{}`", name), *span);
+                        return;
+                    }
+                };
+                if !sym.mutable {
+                    self.error(
+                        format!("cannot assign to immutable variable `{}`", name),
+                        *span,
+                    );
+                    return;
+                }
+
+                let value_ty = self.analyze_expr(value);
+                // The result of `x <op> value` must be assignable back to x.
+                let _ = match compound_op {
+                    TokenKind::PlusEq if sym.ty == Type::String => {
+                        if value_ty != Type::String {
+                            self.error(
+                                format!(
+                                    "cannot concatenate `{}` onto a `string`",
+                                    type_name(&value_ty)
+                                ),
+                                *span,
+                            );
+                        }
+                        Type::String
+                    }
+                    TokenKind::PlusEq
+                    | TokenKind::MinusEq
+                    | TokenKind::StarEq
+                    | TokenKind::SlashEq
+                    | TokenKind::PercentEq => {
+                        if sym.ty != Type::Int || value_ty != Type::Int {
+                            self.error(
+                                format!(
+                                    "compound assignment requires two `int`s, found `{}` {}= `{}`",
+                                    type_name(&sym.ty),
+                                    match compound_op {
+                                        TokenKind::PlusEq => "+",
+                                        TokenKind::MinusEq => "-",
+                                        TokenKind::StarEq => "*",
+                                        TokenKind::SlashEq => "/",
+                                        _ => "%",
+                                    },
+                                    type_name(&value_ty)
+                                ),
+                                *span,
+                            );
+                        }
+                        Type::Int
+                    }
+                    _ => unreachable!("parser only produces assignment operators here"),
+                };
             }
             Stmt::Expr(expr) => {
                 self.analyze_expr(expr);

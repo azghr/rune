@@ -283,6 +283,62 @@ fn comparing_a_concatenation_yields_bool_in_ir() {
 }
 
 #[test]
+fn compound_assignment_lowers_to_binary_plus_move() {
+    // pre-pass lowering: `1 + 2` would be constant-folded away otherwise
+    let module = lower("fn main() { let mut x = 1 x += 2 print(x) }");
+    let main = &module.functions[0];
+    let insts = &main.body[0].instructions;
+    assert!(insts.iter().any(|i| matches!(
+        i,
+        Instruction::Binary {
+            op: BinOp::Add,
+            ty: Type::Int,
+            ..
+        }
+    )));
+    assert!(insts.iter().any(|i| matches!(
+        i,
+        Instruction::Move { dest, ty: Type::Int, .. } if dest == "x"
+    )));
+}
+
+#[test]
+fn string_compound_assignment_lowers_as_concatenation() {
+    let module = lowered("fn main() { let mut s = \"a\" s += \"b\" print(s) }");
+    let main = &module.functions[0];
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::Binary {
+            op: BinOp::Add,
+            ty: Type::String,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn assigning_a_non_constant_invalidates_known_constants() {
+    // Regression: propagation once kept `x -> 1` live across `x = f()`,
+    // folding `print(x)` into `print(1)`.
+    let module = lowered("fn f() -> int { return 7 } fn main() { let mut x = 1 x = f() print(x) }");
+    let main = module.functions.last().unwrap();
+    let print_args = main
+        .body
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .filter_map(|i| match i {
+            Instruction::Call { name, args, .. } if name == "print" => args.first(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(print_args.len(), 1);
+    assert!(
+        !matches!(print_args[0], Value::ConstInt(1)),
+        "the stale constant must not survive the non-constant store"
+    );
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

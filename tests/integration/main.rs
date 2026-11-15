@@ -191,6 +191,52 @@ fn unary_operators_evaluate_correctly() {
 }
 
 #[test]
+fn compound_assignment_works_end_to_end() {
+    let out = run_program(
+        "fn main() {
+            let mut x = 1
+            x += 2
+            x *= 3
+            x -= 1
+            print(x)
+            let mut s = \"a\"
+            s += \"b\"
+            s += \"c\"
+            print(s)
+        }",
+    );
+    assert_eq!(out, "8\nabc\n");
+}
+
+#[test]
+fn for_loops_work_end_to_end() {
+    let out = run_program(
+        "fn main() {
+            let mut sum = 0
+            for let mut i = 0; i < 5; i += 1 {
+                sum += i
+            }
+            print(sum)
+
+            let mut pow = 1
+            for ; pow < 100; pow *= 2 {
+                print(pow)
+            }
+        }",
+    );
+    assert_eq!(out, "10\n1\n2\n4\n8\n16\n32\n64\n");
+}
+
+#[test]
+fn reassigning_from_a_call_beats_constant_propagation() {
+    // Regression: ConstFold once kept `x -> 1` across `x = f()` and
+    // folded `print(x)` into `print(1)`.
+    let out =
+        run_program("fn f() -> int { return 7 } fn main() { let mut x = 1 x = f() print(x) }");
+    assert_eq!(out, "7\n");
+}
+
+#[test]
 fn lex_errors_stop_the_pipeline() {
     let err = Compiler::compile("test.rune", "fn main() { let x = @ }")
         .expect_err("unexpected character should fail");

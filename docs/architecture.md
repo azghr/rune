@@ -78,9 +78,12 @@ a `Vec<Token>` — each token is a `TokenKind` plus its `Span`.
 A recursive-descent parser producing the AST defined in `src/language/ast.rs`.
 
 **Statements** (`stmt.rs`, `decl.rs`): function declarations, `let` and
-`let mut` bindings (with an optional `: type` annotation), assignments,
-`if`/`else` (including `else if` chains, which desugar into a block wrapping
-the inner if), `while`, `return`, blocks, and expression statements.
+`let mut` bindings (with an optional `: type` annotation), plain and compound
+assignments (`+=` etc.), `if`/`else` (including `else if` chains, which
+desugar into a block wrapping the inner if), `while`, C-style `for` (pure
+sugar: it desugars into a block holding the initializer followed by a `while`
+whose body ends with the step, so no later stage knows `for` exists),
+`return`, blocks, and expression statements.
 A value-less `return` is recognized by the next token not being able to start
 an expression, so no semicolon is required before `}`. Statements are terminated by an
 optional semicolon — a line break alone is enough, since the lexer discards
@@ -114,7 +117,8 @@ The type checker walks the AST top-down.
   collected in a first pass, so recursion and calls before definition work.
   The checker verifies:
   - variables are declared before use and assignments match the declared type
-  - only variables declared `let mut` may be reassigned
+  - only variables declared `let mut` may be reassigned; compound
+    assignments (`x += v`) are checked as `x = x <op> v`
   - `let` values match an explicit type annotation when one is given, and are
     not `void`
   - calls resolve to a declared function with matching argument count and

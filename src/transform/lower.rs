@@ -260,13 +260,14 @@ fn bin_op_result(op: &TokenKind) -> Type {
     }
 }
 
+/// Maps an expression or compound-assignment operator to its IR binary op.
 fn bin_op(op: &TokenKind) -> BinOp {
     match op {
-        TokenKind::Plus => BinOp::Add,
-        TokenKind::Minus => BinOp::Sub,
-        TokenKind::Star => BinOp::Mul,
-        TokenKind::Slash => BinOp::Div,
-        TokenKind::Percent => BinOp::Mod,
+        TokenKind::Plus | TokenKind::PlusEq => BinOp::Add,
+        TokenKind::Minus | TokenKind::MinusEq => BinOp::Sub,
+        TokenKind::Star | TokenKind::StarEq => BinOp::Mul,
+        TokenKind::Slash | TokenKind::SlashEq => BinOp::Div,
+        TokenKind::Percent | TokenKind::PercentEq => BinOp::Mod,
         TokenKind::EqEq => BinOp::Eq,
         TokenKind::BangEq => BinOp::NotEq,
         TokenKind::Less => BinOp::Lt,
@@ -300,14 +301,41 @@ fn lower_statement(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, stmt: &
                 ty: var_ty,
             });
         }
-        Stmt::Assign { name, value, .. } => {
+        Stmt::Assign {
+            name, op, value, ..
+        } => {
             let var_ty = lowerer.var_type(name);
-            let (value, _) = lower_expr(builder, lowerer, value);
-            builder.push(Instruction::Move {
-                dest: name.clone(),
-                value,
-                ty: var_ty,
-            });
+            let (value, value_ty) = lower_expr(builder, lowerer, value);
+            if *op == TokenKind::Eq {
+                builder.push(Instruction::Move {
+                    dest: name.clone(),
+                    value,
+                    ty: var_ty,
+                });
+            } else {
+                // `x <op>= value` becomes `x = x <op> value`. String `+`
+                // is concatenation and yields a string.
+                let result_ty = if matches!(op, TokenKind::Plus | TokenKind::PlusEq)
+                    && (var_ty == Type::String || value_ty == Type::String)
+                {
+                    Type::String
+                } else {
+                    Type::Int
+                };
+                let temp = builder.fresh_temp();
+                builder.push(Instruction::Binary {
+                    dest: temp.clone(),
+                    left: Value::Local(name.clone()),
+                    op: bin_op(op),
+                    right: value,
+                    ty: result_ty,
+                });
+                builder.push(Instruction::Move {
+                    dest: name.clone(),
+                    value: Value::Local(temp),
+                    ty: var_ty,
+                });
+            }
         }
         Stmt::Expr(expr) => {
             // Statement expressions only need the side effects.

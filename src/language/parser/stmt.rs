@@ -39,6 +39,8 @@ impl Parser {
             self.parse_if()
         } else if self.matches(&[TokenKind::While]) {
             self.parse_while()
+        } else if self.matches(&[TokenKind::For]) {
+            self.parse_for()
         } else if self.matches(&[TokenKind::Return]) {
             self.parse_return()
         } else if self.matches(&[TokenKind::LBrace]) {
@@ -48,13 +50,24 @@ impl Parser {
             // Expression statement or assignment
             let expr = self.parse_expression()?;
             if let Expr::Variable { name, span } = &expr
-                && self.matches(&[TokenKind::Eq])
+                && self.matches(&[
+                    TokenKind::Eq,
+                    TokenKind::PlusEq,
+                    TokenKind::MinusEq,
+                    TokenKind::StarEq,
+                    TokenKind::SlashEq,
+                    TokenKind::PercentEq,
+                ])
             {
+                // The operator doubles as the AST's `op`: `Eq` is plain
+                // assignment, the rest are compound assignments.
+                let op = self.previous().kind.clone();
                 let value = self.parse_expression()?;
                 let value_span = value.span();
                 self.end_of_statement();
                 return Ok(Stmt::Assign {
                     name: name.clone(),
+                    op,
                     value,
                     span: span.merge(value_span),
                 });
@@ -122,6 +135,74 @@ impl Parser {
             else_branch,
             span: start_span.merge(self.previous().span),
         })
+    }
+
+    /// Parses a C-style `for` loop:
+    ///
+    /// ```text
+    /// for let mut i = 0; i < 10; i += 1 { body }
+    /// ```
+    ///
+    /// All three clauses are optional. The loop is desugared into a block
+    /// holding the initializer followed by a `while` whose body ends with
+    /// the step, so no other stage needs to know `for` exists:
+    ///
+    /// ```text
+    /// { init; while cond { body; step } }
+    /// ```
+    fn parse_for(&mut self) -> Result<Stmt, Diagnostic> {
+        let start_span = self.previous().span;
+
+        let init = if self.matches(&[TokenKind::Semicolon]) {
+            None
+        } else {
+            // let / assignment / expression statement; consumes the `;`
+            Some(self.parse_statement()?)
+        };
+
+        let condition = if self.check(&TokenKind::Semicolon) {
+            self.advance();
+            None
+        } else {
+            let cond = Some(self.parse_expression()?);
+            self.consume(TokenKind::Semicolon, "expected `;` after for condition")?;
+            cond
+        };
+
+        let step = if self.check(&TokenKind::LBrace) {
+            None
+        } else {
+            // assignment / expression statement; consumes the optional `;`
+            Some(self.parse_statement()?)
+        };
+
+        self.consume(TokenKind::LBrace, "expected `{` after for clauses")?;
+        let body = self.parse_block_after_lbrace()?;
+
+        let mut loop_body = body.statements;
+        if let Some(step) = step {
+            loop_body.push(step);
+        }
+        let mut statements = Vec::new();
+        if let Some(init) = init {
+            statements.push(init);
+        }
+        statements.push(Stmt::While {
+            condition: condition.unwrap_or(Expr::Bool {
+                value: true,
+                span: start_span,
+            }),
+            body: Block {
+                statements: loop_body,
+                span: body.span,
+            },
+            span: start_span.merge(body.span),
+        });
+
+        Ok(Stmt::Block(Block {
+            statements,
+            span: start_span.merge(self.previous().span),
+        }))
     }
 
     fn parse_while(&mut self) -> Result<Stmt, Diagnostic> {

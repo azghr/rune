@@ -4,10 +4,11 @@ All notable changes to Rune are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-11-15
+## [Unreleased]
 
-First open-source release: a complete end-to-end compiler pipeline for a
-small statically typed language.
+Nothing has been released yet; everything below describes the state of the
+`main` branch and will become the contents of the first release (v0.1.0)
+when it is tagged.
 
 ### Language
 
@@ -16,13 +17,14 @@ small statically typed language.
   before definition work
 - `let` bindings with optional type annotations; immutability by default
   with `let mut` for reassignable variables
-- Control flow: `if`/`else if`/`else`, `while`, and `return` (valued and
-  bare)
-- Operators: arithmetic, comparison, equality, and short-circuit `&&`/`||`;
-  statements are separated by newlines or semicolons
+- Control flow: `if`/`else if`/`else`, `while`, C-style `for` with optional
+  clauses, and `return` (valued and bare)
+- Operators: arithmetic, comparison, equality, short-circuit `&&`/`||`, and
+  compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`; `+=` concatenates
+  strings); statements are separated by newlines or semicolons
 - `print(expr)` builtin for integers, bools, and strings
 - Strings: comparison with `==`/`!=` (contents, via `strcmp`) and
-  concatenation with `+` (via a runtime helper; results are currently
+  concatenation with `+`/`+=` (via a runtime helper; results are currently
   leaked by design)
 
 ### Compiler
@@ -46,10 +48,15 @@ small statically typed language.
 
 - `rune` CLI: compiles `.rune` files to C, invokes `gcc`, produces a binary
 - `irdebug` binary: dumps the IR before and after each pass
-- Test suite (~103 tests) across lexer, parser, checker, codegen, IR
-  passes, and end-to-end binaries that compile with `gcc` and check output
+- Test suite (110 tests) across lexer, parser, checker, IR passes, codegen,
+  and end-to-end binaries that compile with `gcc` and check output
 - CI on every push and PR: formatting, clippy, build, tests, and a
   pipeline smoke test
+
+### Fixed
+
+- Constant propagation no longer keeps a stale constant across a
+  non-constant reassignment (`x = f()` now correctly invalidates `x`)
 
 ### Known limitations
 
@@ -59,5 +66,3 @@ small statically typed language.
 - No standard library to speak of (`std/core.rune` is a placeholder)
 - The IR-to-C output uses labels and gotos rather than structured control
   flow
-
-[0.1.0]: https://github.com/azghr/rune/releases/tag/v0.1.0

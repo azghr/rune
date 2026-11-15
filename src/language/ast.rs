@@ -43,6 +43,9 @@ pub enum Stmt {
     },
     Assign {
         name: String,
+        /// `Eq` for plain assignment, or the arithmetic operator for
+        /// compound assignment (`+=` etc.).
+        op: TokenKind,
         value: Expr,
         span: Span,
     },

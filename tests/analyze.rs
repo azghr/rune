@@ -195,6 +195,39 @@ fn errors_on_string_arithmetic() {
 }
 
 #[test]
+fn compound_assignment_is_checked_like_the_expanded_form() {
+    // `x += 1` on an int and `s += "t"` on a string are both fine
+    analyze("fn main() { let mut x = 1 x += 1 let mut s = \"a\" s += \"b\" print(x) print(s) }");
+}
+
+#[test]
+fn errors_on_compound_assignment_type_mismatch() {
+    let errs = analyze_errors("fn main() { let mut x = 1 x += \"s\" }");
+    assert!(errs.iter().any(|e| {
+        e.message
+            .contains("compound assignment requires two `int`s")
+    }));
+}
+
+#[test]
+fn errors_on_string_compound_subtraction() {
+    let errs = analyze_errors("fn main() { let mut s = \"a\" s -= \"b\" }");
+    assert!(errs.iter().any(|e| {
+        e.message
+            .contains("compound assignment requires two `int`s")
+    }));
+}
+
+#[test]
+fn errors_on_compound_assignment_to_immutable() {
+    let errs = analyze_errors("fn main() { let x = 1 x += 1 }");
+    assert!(errs.iter().any(|e| {
+        e.message
+            .contains("cannot assign to immutable variable `x`")
+    }));
+}
+
+#[test]
 fn collects_multiple_errors_across_statements() {
     let errs = analyze_errors("fn main() { let a: bool = 1 let b: int = true }");
     assert_eq!(errs.len(), 2);

@@ -24,7 +24,7 @@ and linked against a small C runtime.
 
 - Statically typed with `int`, `bool`, `string`, and `void`
 - C-family syntax: functions, `let`/`let mut` bindings, `if`/`else if`/`else`,
-  `while`, `return`
+  `while`, `for`, `return`, and compound assignment (`+=` etc.)
 - Logical operators (`&&`, `||`) with correct precedence
 - Immutability by default: only `mut` variables can be reassigned
 - String comparison with `==`/`!=` compares contents
@@ -81,7 +81,10 @@ fn main() {
         print(0)
     }
 
-    y = y + 1
+    y += 1
+    for ; y < 23; y += 1 {
+        print(y)
+    }
     print(true)
     print("done")
 }
@@ -125,7 +128,7 @@ More examples live in [`examples/`](examples).
       parser, checker, IR passes, codegen, and end-to-end binaries)
 - [x] IR optimization passes wired into the pipeline: constant folding,
       branch elimination, liveness-based dead code elimination
-- [x] Released as v0.1.0 (see [CHANGELOG.md](CHANGELOG.md))
+- [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
 - [ ] Functions as values / closures
 - [ ] LLVM or WASM backend
 

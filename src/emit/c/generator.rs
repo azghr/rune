@@ -207,11 +207,27 @@ impl CGenerator {
                 self.emit_expr(value);
                 self.output.push_str(";\n");
             }
-            Stmt::Assign { name, value, .. } => {
+            Stmt::Assign {
+                name, op, value, ..
+            } => {
                 self.indent_write();
-                write!(self.output, "{} = ", name).unwrap();
-                self.emit_expr(value);
-                self.output.push_str(";\n");
+                if matches!(op, TokenKind::Plus | TokenKind::PlusEq)
+                    && self.var_type(name) == Some(Type::String)
+                {
+                    // String `+=` is concatenation through the runtime.
+                    write!(self.output, "{} = rune_strcat({}, ", name, name).unwrap();
+                    self.emit_expr(value);
+                    self.output.push_str(");\n");
+                } else if *op == TokenKind::Eq {
+                    write!(self.output, "{} = ", name).unwrap();
+                    self.emit_expr(value);
+                    self.output.push_str(";\n");
+                } else {
+                    // Numeric compound assignment maps directly to C.
+                    write!(self.output, "{} {}= ", name, Self::op_to_c(op)).unwrap();
+                    self.emit_expr(value);
+                    self.output.push_str(";\n");
+                }
             }
             Stmt::Expr(expr) => {
                 self.indent_write();

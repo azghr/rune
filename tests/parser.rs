@@ -248,6 +248,77 @@ fn parses_grouping_and_unary() {
 }
 
 #[test]
+fn parses_compound_assignment() {
+    let func = only_function("fn main() { let mut x = 1 x += 2 x -= 1 x *= 3 x /= 2 x %= 4 }");
+    let ops: Vec<TokenKind> = func
+        .body
+        .statements
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Assign { op, .. } => Some(op.clone()),
+            _ => None,
+        })
+        .collect();
+    // the `let` binding is a Let statement, so only the five compound
+    // assignments appear
+    assert_eq!(
+        ops,
+        vec![
+            TokenKind::PlusEq,
+            TokenKind::MinusEq,
+            TokenKind::StarEq,
+            TokenKind::SlashEq,
+            TokenKind::PercentEq,
+        ]
+    );
+}
+
+/// The `for` loop is pure syntax sugar: it desugars into a block holding
+/// the initializer followed by a `while` whose body ends with the step.
+#[test]
+fn for_loop_desugars_into_block_with_while() {
+    let func = only_function("fn main() { for let mut i = 0; i < 3; i += 1 { print(i) } }");
+    let Stmt::Block(block) = &func.body.statements[0] else {
+        panic!("expected desugared block");
+    };
+    assert_eq!(block.statements.len(), 2);
+    assert!(matches!(&block.statements[0], Stmt::Let { .. }));
+    let Stmt::While {
+        condition, body, ..
+    } = &block.statements[1]
+    else {
+        panic!("expected while inside the desugared block");
+    };
+    // cond is the parsed condition; body ends with the step statement
+    assert!(matches!(condition, Expr::Binary { .. }));
+    let Stmt::Assign {
+        op: TokenKind::PlusEq,
+        ..
+    } = body.statements.last().unwrap()
+    else {
+        panic!("expected step assignment at the end of the loop body");
+    };
+}
+
+#[test]
+fn for_loop_clauses_are_optional() {
+    // all clauses empty: infinite loop
+    let func = only_function("fn main() { for ;; { return } }");
+    let Stmt::Block(block) = &func.body.statements[0] else {
+        panic!("expected desugared block");
+    };
+    assert_eq!(
+        block.statements.len(),
+        1,
+        "no init means only the while remains"
+    );
+    let Stmt::While { condition, .. } = &block.statements[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(condition, Expr::Bool { value: true, .. }));
+}
+
+#[test]
 fn errors_on_unterminated_block() {
     let err = common::parse_error("fn main() { let x = 1");
     assert!(err.message.contains("expected `}`"));
