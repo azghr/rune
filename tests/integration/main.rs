@@ -126,6 +126,30 @@ fn else_if_chains_evaluate_correctly() {
 }
 
 #[test]
+fn anonymous_functions_work_end_to_end() {
+    let out = run_program(
+        "fn apply(f: fn(int) -> int, x: int) -> int {
+            return f(x)
+        }
+        fn main() {
+            let add = fn(a: int, b: int) -> int {
+                return a + b
+            }
+            print(add(2, 3))
+            print(apply(fn(n: int) -> int {
+                return n * 10
+            }, 4))
+
+            let mul = fn(a: int, b: int) -> int {
+                return a * b
+            }
+            print(mul(add(1, 2), 4))
+        }",
+    );
+    assert_eq!(out, "5\n40\n12\n");
+}
+
+#[test]
 fn string_concatenation_works_end_to_end() {
     let out = run_program(
         "fn main() {

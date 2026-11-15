@@ -447,6 +447,24 @@ fn chained_calls_lower_to_nested_call_indirects() {
 }
 
 #[test]
+fn anonymous_functions_are_hoisted_to_named_functions() {
+    let module = lowered("fn main() { let f = fn(x: int) -> int { return x + 1 } print(f(1)) }");
+    assert_eq!(module.functions.len(), 2, "lambda hoisted beside main");
+    assert_eq!(module.functions[0].name, "main");
+    assert_eq!(module.functions[1].name, "rune_lambda_0");
+    // the reference is a move of the lambda's name with its function type
+    let main = &module.functions[0];
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::Move {
+            dest,
+            value: Value::Local(v),
+            ty: Type::Function { .. },
+        } if dest == "f" && v == "rune_lambda_0"
+    )));
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

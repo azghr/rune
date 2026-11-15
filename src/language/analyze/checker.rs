@@ -582,6 +582,40 @@ impl Analyzer {
                 }
             }
             Expr::Grouping { expr, .. } => self.analyze_expr(expr),
+            Expr::AnonymousFunction {
+                params,
+                return_type,
+                body,
+                span,
+            } => {
+                // The body is checked against ONLY its parameters: the
+                // enclosing scope stack is swapped out, so referencing an
+                // outer local is a compile error — capturing environments
+                // is not supported yet. Declared functions remain
+                // referenceable through the function table.
+                let ret = return_type.clone().unwrap_or(Type::Void);
+                let saved_scopes = std::mem::take(&mut self.scopes);
+                self.scopes = ScopeStack::new();
+                self.scopes.push();
+                for p in params {
+                    let _ = self.scopes.define(Symbol {
+                        name: p.name.clone(),
+                        ty: p.ty.clone(),
+                        span: p.span,
+                        mutable: false,
+                    });
+                }
+                let saved_return = self.current_return_type.clone();
+                self.current_return_type = Some(ret.clone());
+                self.analyze_block(body);
+                self.current_return_type = saved_return;
+                self.scopes = saved_scopes;
+                let _ = span;
+                Type::Function {
+                    params: params.iter().map(|p| p.ty.clone()).collect(),
+                    return_type: Box::new(ret),
+                }
+            }
         }
     }
 

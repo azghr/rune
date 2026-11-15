@@ -115,6 +115,12 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    AnonymousFunction {
+        params: Vec<Param>,
+        return_type: Option<Type>,
+        body: Block,
+        span: Span,
+    },
     Grouping {
         expr: Box<Expr>,
         span: Span,

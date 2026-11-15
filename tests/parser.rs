@@ -333,6 +333,28 @@ fn parses_chained_calls() {
 }
 
 #[test]
+fn parses_anonymous_functions() {
+    let func = only_function(
+        "fn main() { let f = fn(a: int, b: int) -> int { return a + b } print(f(1, 2)) }",
+    );
+    let Stmt::Let { value, .. } = &func.body.statements[0] else {
+        panic!("expected let");
+    };
+    let Expr::AnonymousFunction {
+        params,
+        return_type,
+        body,
+        ..
+    } = value
+    else {
+        panic!("expected an anonymous function");
+    };
+    assert_eq!(params.len(), 2);
+    assert_eq!(*return_type, Some(Type::Int));
+    assert_eq!(body.statements.len(), 1);
+}
+
+#[test]
 fn parses_break_and_continue() {
     let func = only_function("fn main() { while true { break continue } }");
     let Stmt::While { body, .. } = &func.body.statements[0] else {

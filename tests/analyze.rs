@@ -327,6 +327,50 @@ fn errors_on_calling_a_non_function() {
 }
 
 #[test]
+fn anonymous_functions_type_check() {
+    analyze(
+        "fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+        fn main() {
+            let add = fn(a: int, b: int) -> int { return a + b }
+            print(add(1, 2))
+            print(apply(fn(n: int) -> int { return n * 10 }, 4))
+        }",
+    );
+}
+
+#[test]
+fn lambda_return_type_mismatches_are_errors() {
+    let errs = analyze_errors("fn main() { let f = fn() -> int { return true } print(f()) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("return type mismatch"))
+    );
+}
+
+#[test]
+fn captures_are_rejected_with_a_clear_error() {
+    // Closures that capture their environment are not supported yet; the
+    // body is checked against only its parameters.
+    let errs = analyze_errors(
+        "fn main() { let n = 5 let addn = fn(x: int) -> int { return x + n } print(addn(1)) }",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("undefined variable `n`"))
+    );
+}
+
+#[test]
+fn lambda_params_shadow_nothing_and_arity_is_checked() {
+    let errs =
+        analyze_errors("fn main() { let f = fn(x: int) -> int { return x } print(f(1, 2)) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("expects 1 argument(s), found 2"))
+    );
+}
+
+#[test]
 fn collects_multiple_errors_across_statements() {
     let errs = analyze_errors("fn main() { let a: bool = 1 let b: int = true }");
     assert_eq!(errs.len(), 2);

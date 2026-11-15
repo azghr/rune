@@ -89,6 +89,17 @@ fn string_equality_is_emitted_as_strcmp() {
 }
 
 #[test]
+fn anonymous_functions_become_named_c_functions() {
+    // through the real pipeline: lowering hoists the lambda, so both the
+    // generated function and its pointer-typed binding appear in the C
+    let c = common::compile("fn main() { let f = fn(x: int) -> int { return x + 1 } print(f(1)) }")
+        .expect("compiles");
+    assert!(c.contains("int64_t rune_lambda_0(int64_t x)"));
+    assert!(c.contains("int64_t (*f)(int64_t);"));
+    assert!(c.contains("f = rune_lambda_0;"));
+}
+
+#[test]
 fn function_values_become_c_function_pointers() {
     let c = generate(
         "fn twice(n: int) -> int { return n * 2 }

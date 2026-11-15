@@ -152,6 +152,12 @@ them.
   evaluated in its own block, reached only if the left operand allows it, so
   side effects behave exactly as they would in C.
 - Every function's fall-through end gets an implicit `Return(None)`.
+- Anonymous function expressions are **hoisted**: each body becomes a
+  synthesized top-level function (`rune_lambda_N`), discovered through a
+  worklist since lambda bodies can contain further lambdas. The expression
+  lowers to a function reference, reusing all the function-value machinery.
+  The checker rejects captures by checking lambda bodies against only their
+  parameters — captured environments are future work.
 - A `type` environment is rebuilt during lowering (parameters, `let` bindings,
   block scoping) so each instruction carries the type its C emission needs.
 

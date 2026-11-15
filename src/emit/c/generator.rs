@@ -199,6 +199,14 @@ impl CGenerator {
                 }
             }
             Expr::Grouping { expr, .. } => self.infer_type(expr),
+            Expr::AnonymousFunction {
+                params,
+                return_type,
+                ..
+            } => Type::Function {
+                params: params.iter().map(|p| p.ty.clone()).collect(),
+                return_type: Box::new(return_type.clone().unwrap_or(Type::Void)),
+            },
             Expr::Unary { op, .. } => match op {
                 TokenKind::Minus => Type::Int,
                 _ => Type::Bool,
@@ -431,6 +439,10 @@ impl CGenerator {
                 self.output.push_str(Self::op_to_c(op));
                 self.emit_expr(expr);
             }
+            Expr::AnonymousFunction { .. } => unreachable!(
+                "anonymous functions are hoisted to named functions by the lowering stage; \
+                this reference emitter does not handle them"
+            ),
             Expr::Call { callee, args, .. } => {
                 // `print` parses as a call whose callee is its name.
                 if let Expr::Variable { name, .. } = callee.as_ref()

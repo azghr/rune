@@ -125,6 +125,24 @@ impl Parser {
         let kind = token.kind.clone();
 
         match kind {
+            TokenKind::Fn => {
+                // Anonymous function expression: fn(params) -> ret { body }.
+                self.consume(TokenKind::LParen, "expected `(` after `fn`")?;
+                let params = self.parse_fn_params()?;
+                let return_type = if self.matches(&[TokenKind::Arrow]) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                self.consume(TokenKind::LBrace, "expected `{` to start the function body")?;
+                let body = self.parse_block_after_lbrace()?;
+                Ok(Expr::AnonymousFunction {
+                    params,
+                    return_type,
+                    body,
+                    span: span.merge(self.previous().span),
+                })
+            }
             TokenKind::Int(v) => Ok(Expr::Int { value: v, span }),
             TokenKind::True => Ok(Expr::Bool { value: true, span }),
             TokenKind::False => Ok(Expr::Bool { value: false, span }),
@@ -195,6 +213,7 @@ impl Expr {
             | Expr::Binary { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Call { span, .. }
+            | Expr::AnonymousFunction { span, .. }
             | Expr::Grouping { span, .. } => *span,
         }
     }

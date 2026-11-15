@@ -8,6 +8,41 @@ use crate::language::ast::{Function, Param};
 use crate::language::token::TokenKind;
 
 impl Parser {
+    /// Parses `(name: type, ...)` after the opening parenthesis is consumed,
+    /// consuming the closing parenthesis. Shared by declarations and
+    /// anonymous function expressions.
+    pub(crate) fn parse_fn_params(&mut self) -> Result<Vec<Param>, Diagnostic> {
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            loop {
+                let (param_name, param_span) = {
+                    let tok =
+                        self.consume(TokenKind::Ident(String::new()), "expected parameter name")?;
+                    let name = match &tok.kind {
+                        TokenKind::Ident(n) => n.clone(),
+                        _ => unreachable!(),
+                    };
+                    (name, tok.span)
+                };
+
+                self.consume(TokenKind::Colon, "expected `:` after parameter name")?;
+                let ty = self.parse_type()?;
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                    span: param_span,
+                });
+
+                if !self.matches(&[TokenKind::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenKind::RParen, "expected `)` after parameters")?;
+        Ok(params)
+    }
+
     pub fn parse_function(&mut self) -> Result<Function, Diagnostic> {
         let start_span = self.consume(TokenKind::Fn, "expected `fn`")?.span;
 

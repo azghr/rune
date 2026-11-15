@@ -126,7 +126,7 @@ More examples live in [`examples/`](examples).
 ## Roadmap
 
 - [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
-- [ ] Closures with captured environments
+- [ ] Captured environments for anonymous functions (closures)
 - [ ] Function values in the WASM backend (needs reference types)
 - [ ] LLVM backend
 

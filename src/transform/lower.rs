@@ -11,6 +11,7 @@ use crate::language::ast::{Block, Expr, Function as AstFunction, Param, Program,
 use crate::language::token::TokenKind;
 use crate::transform::ir::Function as IrFunction;
 use crate::transform::ir::*;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 /// Lowers a checked `Program` into an IR `Module`.
@@ -31,12 +32,19 @@ pub fn lower_program(program: &Program) -> Module {
         })
         .collect();
 
-    let functions = program
-        .functions
-        .iter()
-        .map(|f| lower_function(f, &functions))
-        .collect();
-    Module { functions }
+    // Anonymous functions are hoisted into synthesized top-level functions.
+    // Lambda bodies can contain further lambdas, so lowering works through a
+    // worklist that grows as lambdas are discovered.
+    let counter = Cell::new(0usize);
+    let mut worklist: Vec<AstFunction> = program.functions.clone();
+    let mut lowered = Vec::new();
+    let mut next = 0;
+    while next < worklist.len() {
+        let func = worklist[next].clone();
+        lowered.push(lower_function(&func, &functions, &counter, &mut worklist));
+        next += 1;
+    }
+    Module { functions: lowered }
 }
 
 /// Builds one function's basic blocks, keeping an "open" block to append
@@ -186,7 +194,12 @@ fn collect_declared_names(statements: &[Stmt], names: &mut HashSet<String>) {
     }
 }
 
-fn lower_function(func: &AstFunction, function_returns: &HashMap<String, Type>) -> IrFunction {
+fn lower_function(
+    func: &AstFunction,
+    function_returns: &HashMap<String, Type>,
+    lambda_counter: &Cell<usize>,
+    worklist: &mut Vec<AstFunction>,
+) -> IrFunction {
     let return_type = func.return_type.clone().unwrap_or(Type::Void);
     let mut builder = FuncBuilder::new(&func.params, &func.body);
 
@@ -198,6 +211,8 @@ fn lower_function(func: &AstFunction, function_returns: &HashMap<String, Type>) 
                 .collect(),
         ],
         function_returns: function_returns.clone(),
+        lambda_counter,
+        worklist,
     };
 
     lower_statements(&mut builder, &mut lowerer, &func.body.statements);
@@ -221,12 +236,17 @@ fn lower_function(func: &AstFunction, function_returns: &HashMap<String, Type>) 
 
 /// Type environment for expression typing during lowering. The checker has
 /// already validated the program; this only recovers the types the IR needs.
-struct ExprLowerer {
+struct ExprLowerer<'a> {
     scopes: Vec<HashMap<String, Type>>,
     function_returns: HashMap<String, Type>,
+    /// Program-wide counter giving hoisted lambdas unique names.
+    lambda_counter: &'a Cell<usize>,
+    /// Hoisted lambda functions are appended here; `lower_program` lowers
+    /// them in turn.
+    worklist: &'a mut Vec<AstFunction>,
 }
 
-impl ExprLowerer {
+impl ExprLowerer<'_> {
     fn enter_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -576,6 +596,30 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
             (Value::Local(dest), ty)
         }
         Expr::Call { .. } => lower_call(builder, lowerer, expr, true),
+        Expr::AnonymousFunction {
+            params,
+            return_type,
+            body,
+            ..
+        } => {
+            // Hoist the body into a synthesized top-level function; the
+            // expression's value is a reference to it. Captures are already
+            // rejected by the checker, so the lambda needs no environment.
+            let name = format!("rune_lambda_{}", lowerer.lambda_counter.get());
+            lowerer.lambda_counter.set(lowerer.lambda_counter.get() + 1);
+            let ty = Type::Function {
+                params: params.iter().map(|p| p.ty.clone()).collect(),
+                return_type: Box::new(return_type.clone().unwrap_or(Type::Void)),
+            };
+            lowerer.worklist.push(AstFunction {
+                name: name.clone(),
+                params: params.clone(),
+                return_type: return_type.clone(),
+                body: body.clone(),
+                span: expr.span(),
+            });
+            (Value::Local(name), ty)
+        }
     }
 }
 
