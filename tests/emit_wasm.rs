@@ -74,11 +74,24 @@ fn functions_become_wasm_functions() {
 }
 
 #[test]
-fn strings_are_rejected_with_a_clear_error() {
-    let module = common::analyze("fn main() { print(\"hi\") }");
-    let err = wasm::generate(&lower_program(&module)).expect_err("strings should be rejected");
-    assert!(err.contains("does not support string literals"));
-    assert!(err.contains("`main`"));
+fn string_literals_become_data_segments_and_pointers() {
+    let out = wat("fn main() { print(\"hi\") }");
+    assert!(out.contains("(data (i32.const 1024) \"hi\\00\")"));
+    assert!(out.contains("(i32.const 1024)"));
+    assert!(out.contains("call $f_rune_print_string"));
+    assert!(out.contains("(memory (export \"rune_mem\") 1)"));
+}
+
+#[test]
+fn string_concat_and_comparison_use_the_runtime_prelude() {
+    let out =
+        wat("fn main() { let a = \"x\" print(a + \"y\") print(a == \"x\") print(a != \"x\") }");
+    assert!(out.contains("call $f_rune_strcat"));
+    assert!(out.contains("call $f_rune_strcmp"));
+    assert!(out.contains("i32.eqz"));
+    assert!(out.contains("(global $rune_heap"));
+    assert!(out.contains("$f_rune_alloc"));
+    assert!(out.contains("$f_rune_strlen"));
 }
 
 #[test]

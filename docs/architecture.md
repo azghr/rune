@@ -209,7 +209,8 @@ described below.
 module the C emitter consumes — the IR proving itself as a backend-agnostic
 representation.
 
-- `int` maps to `i64`, `bool` to `i32`.
+- `int` maps to `i64`; `bool` and `string` map to `i32` (strings are
+  pointers into linear memory).
 - WASM has no goto, so the CFG is compiled into a **dispatch loop**: every
   block becomes a case in a `br_table`, and each terminator sets a dispatch
   register (`$rune_pc`) and restarts the loop. This is correct for arbitrary

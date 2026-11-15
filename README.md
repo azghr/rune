@@ -36,7 +36,7 @@ and linked against a small C runtime.
   branch elimination), unreachable-block removal, and liveness-based dead
   code elimination
 - Two backends: C (via `gcc`) and WebAssembly text format (`rune --wat`,
-  runnable in any WASM host)
+  runnable in any WASM host, with strings in linear memory)
 - Short-circuit `&&`/`||` lowered to real control flow, not eager evaluation
 - Written in Rust with zero external dependencies
 
@@ -127,7 +127,7 @@ More examples live in [`examples/`](examples).
 
 - [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
 - [ ] Closures with captured environments
-- [ ] Strings and function values in the WASM backend
+- [ ] Function values in the WASM backend (needs reference types)
 - [ ] LLVM backend
 
 ## Contributing

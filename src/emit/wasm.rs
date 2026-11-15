@@ -19,16 +19,88 @@
 //!   ))
 //! ```
 //!
-//! Type mapping: `int` → `i64`, `bool` → `i32`. WASM has no native strings
-//! and (without reference types) no function pointers, so strings and
-//! function values are rejected with clear errors for now. `print` is
-//! provided by host imports.
+//! Type mapping: `int` → `i64`, `bool` and `string` → `i32` (strings are
+//! pointers into linear memory). String literals live in data segments; a
+//! small runtime prelude provides concatenation (`rune_strcat`), contents
+//! comparison (`rune_strcmp`), and a bump allocator with memory growth.
+//! Concatenated strings are never freed, mirroring the C backend.
+//! Function values are rejected with a clear error: they need the
+//! reference-types proposal. `print` is provided by host imports.
 //!
 //! Validate the output with `wat2wasm` (from the wabt toolchain).
 
 use crate::language::ast::Type;
 use crate::transform::ir::*;
 use std::fmt::Write;
+
+/// Fixed WAT runtime prelude appended to every module: a bump allocator over
+/// the linear memory (growing it as needed), strlen, strcat, and strcmp for
+/// the string operations the IR can lower to. Allocation addresses come
+/// after the string-literal data segments (the heap global is initialized
+/// by `generate`).
+const RUNE_RUNTIME: &str = r#"
+  (func $f_rune_alloc (param $sz i32) (result i32) (local $ptr i32)
+    (local.set $sz (i32.and (i32.add (local.get $sz) (i32.const 7)) (i32.const -8)))
+    (local.set $ptr (global.get $rune_heap))
+    (global.set $rune_heap (i32.add (local.get $ptr) (local.get $sz)))
+    ;; grow memory when the allocation runs past the current pages
+    (if (i32.gt_u (global.get $rune_heap) (i32.mul (memory.size) (i32.const 65536)))
+      (then
+        (drop
+          (memory.grow
+            (i32.div_u
+              (i32.add
+                (i32.sub (global.get $rune_heap) (i32.mul (memory.size) (i32.const 65536)))
+                (i32.const 65535))
+              (i32.const 65536))))))
+    (local.get $ptr))
+
+  (func $f_rune_strlen (param $s i32) (result i32) (local $n i32)
+    (block $done
+      (loop $next
+        (br_if $done (i32.eqz (i32.load8_u (i32.add (local.get $s) (local.get $n)))))
+        (local.set $n (i32.add (local.get $n) (i32.const 1)))
+        (br $next)))
+    (local.get $n))
+
+  (func $f_rune_strcat (param $a i32) (param $b i32) (result i32)
+    (local $out i32) (local $la i32) (local $lb i32) (local $i i32)
+    (local.set $la (call $f_rune_strlen (local.get $a)))
+    (local.set $lb (call $f_rune_strlen (local.get $b)))
+    (local.set $out (call $f_rune_alloc (i32.add (i32.add (local.get $la) (local.get $lb)) (i32.const 1))))
+    (local.set $i (i32.const 0))
+    (block $done
+      (loop $next
+        (br_if $done (i32.ge_u (local.get $i) (local.get $la)))
+        (i32.store8 (i32.add (local.get $out) (local.get $i))
+                    (i32.load8_u (i32.add (local.get $a) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $next)))
+    (local.set $i (i32.const 0))
+    (block $done
+      (loop $next
+        (br_if $done (i32.ge_u (local.get $i) (local.get $lb)))
+        (i32.store8 (i32.add (i32.add (local.get $out) (local.get $la)) (local.get $i))
+                    (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $next)))
+    (i32.store8 (i32.add (i32.add (local.get $out) (local.get $la)) (local.get $lb))
+                (i32.const 0))
+    (local.get $out))
+
+  (func $f_rune_strcmp (param $a i32) (param $b i32) (result i32)
+    (local $i i32) (local $ca i32) (local $cb i32)
+    (local.set $i (i32.const 0))
+    (block $done
+      (loop $next
+        (local.set $ca (i32.load8_u (i32.add (local.get $a) (local.get $i))))
+        (local.set $cb (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+        (br_if $done (i32.ne (local.get $ca) (local.get $cb)))
+        (br_if $done (i32.eqz (local.get $ca)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $next)))
+    (i32.sub (local.get $ca) (local.get $cb)))
+"#;
 
 /// Emits a complete WAT module, or an error describing the first unsupported
 /// construct.
@@ -40,13 +112,38 @@ pub fn generate(module: &Module) -> Result<String, String> {
     let mut out = String::new();
     out.push_str("(module\n");
 
-    // Host imports for the print builtin (both variants, for simplicity).
+    // Host imports for the print builtin (all three variants, for
+    // simplicity).
     out.push_str("  (import \"rune\" \"print_int\" (func $f_rune_print_int (param i64)))\n");
     out.push_str("  (import \"rune\" \"print_bool\" (func $f_rune_print_bool (param i32)))\n");
+    out.push_str("  (import \"rune\" \"print_string\" (func $f_rune_print_string (param i32)))\n");
+
+    // Linear memory: exported so hosts can read string values. Literals
+    // live in data segments; the runtime prelude bump-allocates past them.
+    out.push_str("  (memory (export \"rune_mem\") 1)\n");
+
+    let literals = collect_string_literals(module);
+    let heap_base = string_heap_base(&literals);
+    let _ = writeln!(
+        out,
+        "  (global $rune_heap (mut i32) (i32.const {heap_base}))"
+    );
+    for (addr, text) in &literals {
+        let _ = writeln!(
+            out,
+            "  (data (i32.const {addr}) \"{}\")",
+            escape_wat_data(text)
+        );
+    }
+    if !literals.is_empty() {
+        out.push('\n');
+    }
+    // Runtime prelude: allocation, strlen, strcat, strcmp (fixed WAT text).
+    out.push_str(RUNE_RUNTIME);
 
     for func in &module.functions {
         out.push('\n');
-        emit_function(&mut out, func);
+        emit_function(&mut out, func, &literals);
     }
 
     // main is the entry point; export it when present.
@@ -69,27 +166,14 @@ fn check_function(func: &Function) -> Result<(), String> {
     };
 
     for (_, ty) in &func.params {
-        check_type(ty).map_err(|_| unsupported("strings or function values in parameters"))?;
+        check_type(ty).map_err(|_| unsupported("function values in parameters"))?;
     }
-    check_type(&func.return_type)
-        .map_err(|_| unsupported("strings or function values in return types"))?;
+    check_type(&func.return_type).map_err(|_| unsupported("function values in return types"))?;
 
     for block in &func.body {
         for inst in &block.instructions {
             if let Instruction::CallIndirect { .. } = inst {
                 return Err(unsupported("calls through function values"));
-            }
-            if let Instruction::Move {
-                value: Value::ConstString(_),
-                ..
-            } = inst
-            {
-                return Err(unsupported("string literals"));
-            }
-            if let Instruction::Call { args, .. } = inst
-                && args.iter().any(|a| matches!(a, Value::ConstString(_)))
-            {
-                return Err(unsupported("string literals"));
             }
             let tys = match inst {
                 Instruction::Binary { ty, .. }
@@ -109,8 +193,8 @@ fn check_function(func: &Function) -> Result<(), String> {
 
 fn check_type(ty: &Type) -> Result<(), ()> {
     match ty {
-        Type::Int | Type::Bool | Type::Void => Ok(()),
-        Type::String | Type::Function { .. } => Err(()),
+        Type::Int | Type::Bool | Type::Void | Type::String => Ok(()),
+        Type::Function { .. } => Err(()),
     }
 }
 
@@ -120,7 +204,8 @@ fn wasm_type(ty: &Type) -> &'static str {
         Type::Int => "i64",
         Type::Bool => "i32",
         Type::Void => "",
-        Type::String | Type::Function { .. } => unreachable!("rejected by check_function"),
+        Type::String => "i32", // pointer into linear memory
+        Type::Function { .. } => unreachable!("rejected by check_function"),
     }
 }
 
@@ -129,7 +214,7 @@ fn local_ref(name: &str) -> String {
     format!("$l_{name}")
 }
 
-fn emit_function(out: &mut String, func: &Function) {
+fn emit_function(out: &mut String, func: &Function, literals: &[(u32, String)]) {
     let _ = write!(out, "  (func $f_{}", func.name);
     for (name, ty) in &func.params {
         let _ = write!(out, " (param {} {})", local_ref(name), wasm_type(ty));
@@ -149,7 +234,7 @@ fn emit_function(out: &mut String, func: &Function) {
     // The dispatch register for the control-flow loop.
     out.push_str(" (local $rune_pc i32)\n");
 
-    emit_body(out, func, &locals);
+    emit_body(out, func, &locals, literals);
     out.push_str("  )\n");
 }
 
@@ -191,7 +276,12 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
     types
 }
 
-fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)]) {
+fn emit_body(
+    out: &mut String,
+    func: &Function,
+    locals: &[(String, Type)],
+    literals: &[(u32, String)],
+) {
     let blocks = &func.body;
     let n = blocks.len();
     let ind = "    "; // depth 1: inside the func
@@ -218,7 +308,7 @@ fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)]) {
 
     for block in blocks {
         let _ = writeln!(out, "{ind}    )");
-        emit_block_case(out, block, &format!("{ind}    "), locals);
+        emit_block_case(out, block, &format!("{ind}    "), locals, literals);
     }
 
     let _ = writeln!(out, "{ind}  )");
@@ -232,14 +322,20 @@ fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)]) {
 /// Emits one case: the block's instructions and a terminator that either
 /// returns from the function or sets the dispatch register and restarts the
 /// loop.
-fn emit_block_case(out: &mut String, block: &BasicBlock, ind: &str, locals: &[(String, Type)]) {
+fn emit_block_case(
+    out: &mut String,
+    block: &BasicBlock,
+    ind: &str,
+    locals: &[(String, Type)],
+    literals: &[(u32, String)],
+) {
     let case = ind.to_string(); // cases sit one level deeper than their label
     for inst in &block.instructions {
-        emit_instruction(out, inst, &case, locals);
+        emit_instruction(out, inst, &case, locals, literals);
     }
     match &block.terminator {
         Terminator::Return(Some(value)) => {
-            emit_value(out, value, ind, locals);
+            emit_value(out, value, ind, locals, literals);
             let _ = writeln!(out, "{ind}return");
         }
         Terminator::Return(None) => {
@@ -255,7 +351,7 @@ fn emit_block_case(out: &mut String, block: &BasicBlock, ind: &str, locals: &[(S
             then_block,
             else_block,
         } => {
-            emit_value(out, condition, ind, locals);
+            emit_value(out, condition, ind, locals, literals);
             let _ = writeln!(out, "{ind}(if");
             let _ = writeln!(out, "{ind}  (then");
             let _ = writeln!(out, "{ind}    (i32.const {then_block})");
@@ -271,7 +367,13 @@ fn emit_block_case(out: &mut String, block: &BasicBlock, ind: &str, locals: &[(S
     }
 }
 
-fn emit_instruction(out: &mut String, inst: &Instruction, ind: &str, locals: &[(String, Type)]) {
+fn emit_instruction(
+    out: &mut String,
+    inst: &Instruction,
+    ind: &str,
+    locals: &[(String, Type)],
+    literals: &[(u32, String)],
+) {
     match inst {
         Instruction::Binary {
             dest,
@@ -280,9 +382,25 @@ fn emit_instruction(out: &mut String, inst: &Instruction, ind: &str, locals: &[(
             right,
             ty,
         } => {
-            emit_value(out, left, ind, locals);
-            emit_value(out, right, ind, locals);
-            let _ = writeln!(out, "{ind}{}", wasm_bin_op(op, ty));
+            emit_value(out, left, ind, locals, literals);
+            emit_value(out, right, ind, locals, literals);
+            let string_operands = value_type(left, locals) == Type::String
+                || value_type(right, locals) == Type::String;
+            if matches!(op, BinOp::Eq | BinOp::NotEq | BinOp::Add) && string_operands {
+                // String operations go through the runtime prelude.
+                if *op == BinOp::Add {
+                    let _ = writeln!(out, "{ind}call $f_rune_strcat");
+                } else {
+                    let _ = writeln!(out, "{ind}call $f_rune_strcmp");
+                    // strcmp == 0 means equal; flip for `!=`.
+                    let _ = writeln!(out, "{ind}i32.eqz");
+                    if *op == BinOp::NotEq {
+                        let _ = writeln!(out, "{ind}i32.eqz");
+                    }
+                }
+            } else {
+                let _ = writeln!(out, "{ind}{}", wasm_bin_op(op, ty));
+            }
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
         Instruction::Unary {
@@ -292,18 +410,18 @@ fn emit_instruction(out: &mut String, inst: &Instruction, ind: &str, locals: &[(
                 UnaryOp::Neg => {
                     // 0 - value
                     let _ = writeln!(out, "{ind}i64.const 0");
-                    emit_value(out, value, ind, locals);
+                    emit_value(out, value, ind, locals, literals);
                     let _ = writeln!(out, "{ind}i64.sub");
                 }
                 UnaryOp::Not => {
-                    emit_value(out, value, ind, locals);
+                    emit_value(out, value, ind, locals, literals);
                     let _ = writeln!(out, "{ind}i32.eqz");
                 }
             }
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
         Instruction::Move { dest, value, .. } => {
-            emit_value(out, value, ind, locals);
+            emit_value(out, value, ind, locals, literals);
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
         Instruction::Call {
@@ -313,12 +431,13 @@ fn emit_instruction(out: &mut String, inst: &Instruction, ind: &str, locals: &[(
             ty,
         } => {
             for arg in args {
-                emit_value(out, arg, ind, locals);
+                emit_value(out, arg, ind, locals, literals);
             }
             let callee = if name == "print" {
                 // Dispatch on the argument's static type.
                 match args.first().map(|a| value_type(a, locals)) {
                     Some(Type::Bool) => "$f_rune_print_bool",
+                    Some(Type::String) => "$f_rune_print_string",
                     _ => "$f_rune_print_int",
                 }
             } else {
@@ -370,7 +489,79 @@ fn value_type(value: &Value, locals: &[(String, Type)]) -> Type {
     }
 }
 
-fn emit_value(out: &mut String, value: &Value, _ind: &str, _locals: &[(String, Type)]) {
+/// Addresses for every string literal in the module, laid out from a fixed
+/// base so the runtime heap starts after them.
+fn collect_string_literals(module: &Module) -> Vec<(u32, String)> {
+    const STRING_BASE: u32 = 1024;
+    let mut out: Vec<(u32, String)> = Vec::new();
+    let mut next = STRING_BASE;
+    for func in &module.functions {
+        for block in &func.body {
+            for inst in &block.instructions {
+                let mut check_value = |value: &Value| {
+                    if let Value::ConstString(text) = value
+                        && !out.iter().any(|(_, t)| t == text)
+                    {
+                        out.push((next, text.clone()));
+                        next += text.len() as u32 + 1; // NUL terminator
+                    }
+                };
+                match inst {
+                    Instruction::Move { value, .. } => check_value(value),
+                    Instruction::Binary { left, right, .. } => {
+                        check_value(left);
+                        check_value(right);
+                    }
+                    Instruction::Unary { value, .. } => check_value(value),
+                    Instruction::Call { args, .. } => {
+                        for arg in args {
+                            check_value(arg);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Where the runtime bump allocator may start: after all literal bytes,
+/// 8-byte aligned.
+fn string_heap_base(literals: &[(u32, String)]) -> u32 {
+    let end = literals
+        .last()
+        .map_or(1024, |(addr, text)| addr + text.len() as u32 + 1);
+    (end + 7) & !7
+}
+
+/// Escapes a Rune string as a WAT data-segment string (bytes with `\"` and
+/// `\\` literal, everything non-printable as hex).
+fn escape_wat_data(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for b in text.bytes() {
+        match b {
+            b'"' => out.push_str("\\22"),
+            b'\\' => out.push_str("\\5C"),
+            b'\n' => out.push_str("\\0a"),
+            b'\t' => out.push_str("\\09"),
+            0x20..=0x7e => out.push(b as char),
+            other => {
+                let _ = write!(out, "\\{other:02x}");
+            }
+        }
+    }
+    out.push_str("\\00");
+    out
+}
+
+fn emit_value(
+    out: &mut String,
+    value: &Value,
+    _ind: &str,
+    _locals: &[(String, Type)],
+    literals: &[(u32, String)],
+) {
     match value {
         Value::ConstInt(v) => {
             let _ = writeln!(out, "    (i64.const {v})");
@@ -378,7 +569,15 @@ fn emit_value(out: &mut String, value: &Value, _ind: &str, _locals: &[(String, T
         Value::ConstBool(b) => {
             let _ = writeln!(out, "    (i32.const {})", if *b { 1 } else { 0 });
         }
-        Value::ConstString(_) => unreachable!("rejected by check_function"),
+        Value::ConstString(text) => {
+            // The literal's address in linear memory (from the data segments).
+            let addr = literals
+                .iter()
+                .find(|(_, t)| t == text)
+                .map(|(a, _)| *a)
+                .unwrap_or(0);
+            let _ = writeln!(out, "    (i32.const {addr})");
+        }
         Value::Local(name) => {
             let _ = writeln!(out, "    local.get {}", local_ref(name));
         }

@@ -52,8 +52,9 @@ when it is tagged.
 - Test suite (110 tests) across lexer, parser, checker, IR passes, codegen,
   and end-to-end binaries that compile with `gcc` and check output
 - `rune --wat`: a WebAssembly text-format backend emitting from the same
-  IR, with host imports for `print` (strings and function values are
-  rejected with clear errors for now)
+  IR, with host imports for `print` and strings living in linear memory
+  (data segments plus a bump-allocating runtime prelude; function values
+  are rejected with clear errors until reference types)
 - CI on every push and PR: formatting, clippy, build, tests, a pipeline
   smoke test, and a WASM job that validates the generated WAT with wabt and
   executes fib in Node
