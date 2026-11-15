@@ -7,7 +7,7 @@ A small, statically typed programming language written in Rust.
 [![CI](https://github.com/azghr/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/azghr/rune/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-in%20development-orange)](<>)
+[![Status](https://img.shields.io/badge/status-in%20development-orange)]()
 
 </div>
 
@@ -121,9 +121,11 @@ More examples live in [`examples/`](examples).
 - [x] Type checker with lexical scopes
 - [x] Three-address IR with constant folding and dead code elimination
 - [x] C code generation with a small runtime
-- [x] Integration tests and a real test suite (75 tests across lexer,
-      parser, checker, codegen, and end-to-end binaries)
-- [ ] Strings as a first-class value type
+- [x] Integration tests and a real test suite (103 tests across lexer,
+      parser, checker, IR passes, codegen, and end-to-end binaries)
+- [x] IR optimization passes wired into the pipeline: constant folding,
+      branch elimination, liveness-based dead code elimination
+- [x] Released as v0.1.0 (see [CHANGELOG.md](CHANGELOG.md))
 - [ ] Functions as values / closures
 - [ ] LLVM or WASM backend
 
@@ -131,7 +133,8 @@ More examples live in [`examples/`](examples).
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) to
 get started, and note that this project follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+[Code of Conduct](CODE_OF_CONDUCT.md). Notable changes are tracked in the
+[Changelog](CHANGELOG.md).
 
 ## License
 
