@@ -306,6 +306,27 @@ fn errors_on_printing_a_function_value() {
 }
 
 #[test]
+fn chained_calls_check_against_the_returned_fn_type() {
+    analyze(
+        "fn pick(big: bool) -> fn(int) -> int {
+            if big { return twice } return thrice
+        }
+        fn twice(n: int) -> int { return n * 2 }
+        fn thrice(n: int) -> int { return n * 3 }
+        fn main() { print(pick(true)(7)) print(pick(false)(7)) }",
+    );
+}
+
+#[test]
+fn errors_on_calling_a_non_function() {
+    let errs = analyze_errors("fn main() { let x = 1 x(2) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot call a value of type `int`"))
+    );
+}
+
+#[test]
 fn collects_multiple_errors_across_statements() {
     let errs = analyze_errors("fn main() { let a: bool = 1 let b: int = true }");
     assert_eq!(errs.len(), 2);

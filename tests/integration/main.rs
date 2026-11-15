@@ -335,6 +335,31 @@ fn functions_are_first_class_values_end_to_end() {
 }
 
 #[test]
+fn chained_calls_work_end_to_end() {
+    let out = run_program(
+        "fn twice(n: int) -> int {
+            return n * 2
+        }
+        fn triple(n: int) -> int {
+            return n * 3
+        }
+        fn pick(big: bool) -> fn(int) -> int {
+            if big {
+                return triple
+            }
+            return twice
+        }
+        fn main() {
+            print(pick(true)(7))
+            print(pick(false)(7))
+            let f = pick(false)
+            print(f(pick(true)(2)))
+        }",
+    );
+    assert_eq!(out, "21\n14\n12\n");
+}
+
+#[test]
 fn string_escapes_round_trip_through_generated_c() {
     // the lexer decodes escapes; the emitters must re-encode them or the
     // generated C is not even valid

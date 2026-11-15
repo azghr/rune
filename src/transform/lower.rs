@@ -645,7 +645,27 @@ fn lower_call(
         values.push(lower_expr(builder, lowerer, arg).0);
     }
 
-    let ty = lowerer.call_type(callee);
+    // A plain-name callee resolves to print, a local, or a declared
+    // function; anything else is a function value produced by an
+    // expression (e.g. a chained call) and is called indirectly.
+    let callee_name = match callee.as_ref() {
+        Expr::Variable { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    // The callee is lowered at most once, here: a plain name needs no value
+    // unless it resolves to a function-typed local, any other expression
+    // produces the function value to call.
+    let (callee_value, ty) = match &callee_name {
+        Some(name) => (None, lowerer.call_type(name)),
+        None => {
+            let (value, callee_ty) = lower_expr(builder, lowerer, callee);
+            let ty = match callee_ty {
+                Type::Function { return_type, .. } => *return_type,
+                _ => Type::Int,
+            };
+            (Some(value), ty)
+        }
+    };
     let dest = if want_value && ty != Type::Void {
         Some(builder.fresh_temp())
     } else {
@@ -654,25 +674,38 @@ fn lower_call(
 
     // A local holding a function value is an indirect call; a declared
     // function is a direct one.
-    let callee_is_local = callee != "print"
-        && lowerer.scopes.iter().rev().any(|s| {
-            s.get(callee)
-                .is_some_and(|ty| matches!(ty, Type::Function { .. }))
-        });
-    if callee_is_local {
-        builder.push(Instruction::CallIndirect {
-            dest: dest.clone(),
-            callee: Value::Local(callee.clone()),
-            args: values,
-            ty: ty.clone(),
-        });
-    } else {
-        builder.push(Instruction::Call {
-            dest: dest.clone(),
-            name: callee.clone(),
-            args: values,
-            ty: ty.clone(),
-        });
+    let callee_is_local = callee_name.as_ref().is_some_and(|name| {
+        name != "print"
+            && lowerer.scopes.iter().rev().any(|s| {
+                s.get(name)
+                    .is_some_and(|ty| matches!(ty, Type::Function { .. }))
+            })
+    });
+    match callee_name {
+        Some(name) if !callee_is_local => {
+            builder.push(Instruction::Call {
+                dest: dest.clone(),
+                name,
+                args: values,
+                ty: ty.clone(),
+            });
+        }
+        Some(name) => {
+            builder.push(Instruction::CallIndirect {
+                dest: dest.clone(),
+                callee: Value::Local(name),
+                args: values,
+                ty: ty.clone(),
+            });
+        }
+        None => {
+            builder.push(Instruction::CallIndirect {
+                dest: dest.clone(),
+                callee: callee_value.expect("expression callee must produce a value"),
+                args: values,
+                ty: ty.clone(),
+            });
+        }
     }
     match dest {
         Some(d) => (Value::Local(d), ty),

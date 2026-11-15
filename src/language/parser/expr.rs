@@ -130,23 +130,28 @@ impl Parser {
             TokenKind::False => Ok(Expr::Bool { value: false, span }),
             TokenKind::String(s) => Ok(Expr::String { value: s, span }),
             TokenKind::Ident(name) => {
-                if self.matches(&[TokenKind::LParen]) {
+                let mut expr = Expr::Variable { name, span };
+                // A call result can itself be called: `pick(false)(7)`.
+                while self.matches(&[TokenKind::LParen]) {
                     let args = self.parse_call_args()?;
-                    Ok(Expr::Call {
-                        callee: name,
+                    let callee_span = expr.span();
+                    expr = Expr::Call {
+                        callee: Box::new(expr),
                         args,
-                        span: span.merge(self.previous().span),
-                    })
-                } else {
-                    Ok(Expr::Variable { name, span })
+                        span: callee_span.merge(self.previous().span),
+                    };
                 }
+                Ok(expr)
             }
             TokenKind::Print => {
                 // `print` is a keyword but reads as a builtin call expression
                 self.consume(TokenKind::LParen, "expected `(` after `print`")?;
                 let args = self.parse_call_args()?;
                 Ok(Expr::Call {
-                    callee: "print".to_string(),
+                    callee: Box::new(Expr::Variable {
+                        name: "print".to_string(),
+                        span,
+                    }),
                     args,
                     span: span.merge(self.previous().span),
                 })

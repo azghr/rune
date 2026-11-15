@@ -421,8 +421,53 @@ impl Analyzer {
                 }
             }
             Expr::Call { callee, args, span } => {
-                // The only builtin: everything else must be a declared function.
-                match callee.as_str() {
+                // print is a builtin; a plain name resolves to a local or a
+                // declared function; anything else is an expression that
+                // must evaluate to a function value.
+                let Expr::Variable { name, span: _ } = callee.as_ref() else {
+                    let callee_ty = self.analyze_expr(callee);
+                    let (params, return_type) = match callee_ty {
+                        Type::Function {
+                            params,
+                            return_type,
+                        } => (params, *return_type),
+                        other => {
+                            self.error(
+                                format!("cannot call a value of type `{}`", type_name(&other)),
+                                *span,
+                            );
+                            return Type::Int;
+                        }
+                    };
+                    if args.len() != params.len() {
+                        self.error(
+                            format!(
+                                "expected {} argument(s), found {}",
+                                params.len(),
+                                args.len()
+                            ),
+                            *span,
+                        );
+                    }
+                    for (arg, param_ty) in args.iter().zip(&params) {
+                        let arg_ty = self.analyze_expr(arg);
+                        if arg_ty != *param_ty {
+                            self.error(
+                                format!(
+                                    "argument type mismatch: expected `{}`, found `{}`",
+                                    type_name(param_ty),
+                                    type_name(&arg_ty)
+                                ),
+                                arg.span(),
+                            );
+                        }
+                    }
+                    for arg in args.iter().skip(params.len()) {
+                        self.analyze_expr(arg);
+                    }
+                    return return_type;
+                };
+                match name.as_str() {
                     "print" => {
                         if args.len() != 1 {
                             self.error("print takes exactly one argument", *span);
@@ -482,6 +527,18 @@ impl Analyzer {
                             self.analyze_expr(arg);
                         }
                         *return_type
+                    }
+                    name if self.scopes.resolve(name).is_some() => {
+                        // A local that is not a function value.
+                        let ty = self.scopes.resolve(name).unwrap().ty.clone();
+                        self.error(
+                            format!("cannot call a value of type `{}`", type_name(&ty)),
+                            *span,
+                        );
+                        for arg in args {
+                            self.analyze_expr(arg);
+                        }
+                        Type::Int
                     }
                     name => match self.functions.get(name).cloned() {
                         Some(signature) => {

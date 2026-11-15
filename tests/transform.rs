@@ -420,6 +420,33 @@ fn calls_through_function_values_lower_to_call_indirect() {
 }
 
 #[test]
+fn chained_calls_lower_to_nested_call_indirects() {
+    let module = lowered(
+        "fn pick(big: bool) -> fn(int) -> int { if big { return twice } return twice }
+        fn twice(n: int) -> int { return n * 2 }
+        fn main() { print(pick(true)(7)) }",
+    );
+    let main = module.functions.last().unwrap();
+    let insts: Vec<&Instruction> = main
+        .body
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .collect();
+    // the inner pick(true) is a direct call; only the outer call through
+    // its result is indirect
+    let indirects = insts
+        .iter()
+        .filter(|i| matches!(i, Instruction::CallIndirect { dest: Some(_), .. }))
+        .count();
+    assert_eq!(indirects, 1);
+    assert!(
+        insts
+            .iter()
+            .any(|i| matches!(i, Instruction::Call { name, .. } if name == "pick"))
+    );
+}
+
+#[test]
 fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     // Just verify lowering + passes don't crash on representative programs;
     // end-to-end behavior is covered by the integration tests.

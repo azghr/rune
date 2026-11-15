@@ -111,7 +111,7 @@ pub enum Expr {
         span: Span,
     },
     Call {
-        callee: String,
+        callee: Box<Expr>,
         args: Vec<Expr>,
         span: Span,
     },

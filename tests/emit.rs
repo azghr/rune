@@ -104,6 +104,16 @@ fn function_values_become_c_function_pointers() {
 }
 
 #[test]
+fn chained_calls_emit_nested_c_calls() {
+    let c = generate(
+        "fn pick(big: bool) -> fn(int) -> int { if big { return twice } return twice }
+        fn twice(n: int) -> int { return n * 2 }
+        fn main() { print(pick(true)(7)) }",
+    );
+    assert!(c.contains("rune_print_int(pick(true)(7))"));
+}
+
+#[test]
 fn for_loops_become_c_for_loops() {
     let c = generate("fn main() { for let mut i = 0; i < 3; i += 1 { print(i) } }");
     assert!(c.contains("for (int64_t i = 0; (i < 3); i += 1) {"));

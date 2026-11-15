@@ -221,16 +221,24 @@ impl CGenerator {
                 _ => Type::Bool,
             },
             Expr::Call { callee, .. } => {
-                if callee == "print" {
-                    Type::Void
-                } else if let Some(Type::Function { return_type, .. }) = self.var_type(callee) {
-                    // calling through a function-typed local
-                    *return_type
-                } else {
-                    self.function_returns
-                        .get(callee)
+                if let Expr::Variable { name, .. } = callee.as_ref() {
+                    if name == "print" {
+                        return Type::Void;
+                    }
+                    if let Some(Type::Function { return_type, .. }) = self.var_type(name) {
+                        // calling through a function-typed local
+                        return *return_type;
+                    }
+                    return self
+                        .function_returns
+                        .get(name)
                         .cloned()
-                        .unwrap_or(Type::Int)
+                        .unwrap_or(Type::Int);
+                }
+                // calling the result of another expression
+                match self.infer_type(callee) {
+                    Type::Function { return_type, .. } => *return_type,
+                    _ => Type::Int,
                 }
             }
         }
@@ -424,7 +432,10 @@ impl CGenerator {
                 self.emit_expr(expr);
             }
             Expr::Call { callee, args, .. } => {
-                if callee == "print" {
+                // `print` parses as a call whose callee is its name.
+                if let Expr::Variable { name, .. } = callee.as_ref()
+                    && name == "print"
+                {
                     // Dispatch on the argument's static type.
                     let runtime_fn = match args.first().map(|a| self.infer_type(a)) {
                         Some(Type::Bool) => "rune_print_bool",
@@ -438,7 +449,8 @@ impl CGenerator {
                     }
                     self.output.push(')');
                 } else {
-                    write!(self.output, "{}(", callee).unwrap();
+                    self.emit_expr(callee);
+                    self.output.push('(');
                     for (i, arg) in args.iter().enumerate() {
                         if i > 0 {
                             self.output.push_str(", ");

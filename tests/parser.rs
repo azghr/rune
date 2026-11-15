@@ -210,9 +210,13 @@ fn parses_calls_with_nested_call_args() {
     let Expr::Call { callee, args, .. } = value else {
         panic!("expected call");
     };
-    assert_eq!(callee, "f");
+    assert!(matches!(callee.as_ref(), Expr::Variable { name, .. } if name == "f"));
     assert_eq!(args.len(), 2);
-    assert!(matches!(&args[0], Expr::Call { callee, .. } if callee == "g"));
+    assert!(matches!(
+        &args[0],
+        Expr::Call { callee, .. }
+            if matches!(callee.as_ref(), Expr::Variable { name, .. } if name == "g")
+    ));
 }
 
 #[test]
@@ -221,7 +225,7 @@ fn print_is_parsed_as_a_builtin_call() {
     let Stmt::Expr(Expr::Call { callee, .. }) = &func.body.statements[0] else {
         panic!("expected print call statement");
     };
-    assert_eq!(callee, "print");
+    assert!(matches!(callee.as_ref(), Expr::Variable { name, .. } if name == "print"));
 }
 
 #[test]
@@ -306,6 +310,26 @@ fn for_loop_keeps_its_own_ast_node() {
     // reach the step clause, which only a dedicated node can express.
     let func = only_function("fn main() { for ;; { continue } }");
     assert!(matches!(&func.body.statements[0], Stmt::For { .. }));
+}
+
+#[test]
+fn parses_chained_calls() {
+    let func = only_function("fn main() { print(pick(true)(7)) }");
+    let Stmt::Expr(Expr::Call { args, .. }) = &func.body.statements[0] else {
+        panic!("expected call statement");
+    };
+    assert_eq!(args.len(), 1);
+    // print's argument is the chained call: pick(true)(7)
+    let Expr::Call {
+        callee,
+        args: inner_args,
+        ..
+    } = &args[0]
+    else {
+        panic!("expected a chained call");
+    };
+    assert!(matches!(callee.as_ref(), Expr::Call { .. }));
+    assert_eq!(inner_args.len(), 1);
 }
 
 #[test]
