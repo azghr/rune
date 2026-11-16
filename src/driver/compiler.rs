@@ -47,10 +47,7 @@ impl Compiler {
         };
 
         // 3. Analyze
-        let program = match Analyzer::new()
-            .require_main(require_main)
-            .analyze(program)
-        {
+        let program = match Analyzer::new().require_main(require_main).analyze(program) {
             Ok(p) => p,
             Err(errors) => {
                 reporter.report_all(&errors);
