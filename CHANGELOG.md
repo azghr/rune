@@ -6,9 +6,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing has been released yet; everything below describes the state of the
-`main` branch and will become the contents of the first release (v0.1.0)
-when it is tagged.
+Nothing yet.
+
+## [0.1.0] - 2026-11-16
+
+First tagged release.
 
 ### Language
 

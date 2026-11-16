@@ -126,8 +126,6 @@ More examples live in [`examples/`](examples).
 ## Roadmap
 
 - [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
-- [x] Function values in the WASM backend (funcref table + `call_indirect`,
-      no reference types needed)
 - [ ] LLVM backend
 
 ## Contributing
