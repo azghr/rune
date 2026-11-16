@@ -188,6 +188,19 @@ impl CGenerator {
             Expr::Int { .. } => Type::Int,
             Expr::Bool { .. } => Type::Bool,
             Expr::String { .. } => Type::String,
+            Expr::ArrayLiteral { elems, .. } => {
+                // Uniform element type, guaranteed by the checker.
+                Type::Array(Box::new(
+                    elems
+                        .first()
+                        .map(|e| self.infer_type(e))
+                        .unwrap_or(Type::Void),
+                ))
+            }
+            Expr::Index { array, .. } => match self.infer_type(array) {
+                Type::Array(elem) => *elem,
+                _ => Type::Int,
+            },
             Expr::Variable { name, .. } => {
                 // A declared function used as a value has its function type.
                 if let Some(ty) = self.var_type(name) {
@@ -254,6 +267,10 @@ impl CGenerator {
 
     fn emit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::IndexAssign { .. } => panic!(
+                "the reference AST-to-C generator does not support arrays; \
+                 compile through the IR pipeline instead"
+            ),
             Stmt::Let { name, value, .. } => {
                 let ty = self.infer_type(value);
                 self.declare_var(name, ty.clone());
@@ -393,6 +410,10 @@ impl CGenerator {
                 write!(self.output, "\"{}\"", Self::escape_c_string(value)).unwrap()
             }
             Expr::Variable { name, .. } => self.output.push_str(name),
+            Expr::ArrayLiteral { .. } | Expr::Index { .. } => panic!(
+                "the reference AST-to-C generator does not support arrays; \
+                 compile through the IR pipeline instead"
+            ),
             Expr::Binary {
                 left, op, right, ..
             } => {

@@ -18,6 +18,35 @@ void rune_closure_set(void *closure, int idx, int64_t value) {
   ((int64_t *)closure)[idx + 1] = value;
 }
 
+/* Arrays: [length, elems...], one 8-byte slot per element. */
+static void rune_arr_check(void *arr, int64_t idx) {
+  int64_t len = arr ? ((int64_t *)arr)[0] : 0;
+  if (!arr || idx < 0 || idx >= len) {
+    fprintf(stderr, "rune: array index %lld out of bounds (length %lld)\n",
+            (long long)idx, (long long)len);
+    abort();
+  }
+}
+
+void *rune_arr_new(int64_t n) {
+  void **block = calloc((size_t)n + 1, 8);
+  if (!block) { return NULL; }
+  block[0] = (void *)(intptr_t)n;
+  return block;
+}
+
+int64_t rune_arr_len(void *arr) { return arr ? ((int64_t *)arr)[0] : 0; }
+
+int64_t rune_arr_get(void *arr, int64_t idx) {
+  rune_arr_check(arr, idx);
+  return ((int64_t *)arr)[idx + 1];
+}
+
+void rune_arr_set(void *arr, int64_t idx, int64_t value) {
+  rune_arr_check(arr, idx);
+  ((int64_t *)arr)[idx + 1] = value;
+}
+
 /* Concatenates two strings into freshly allocated storage. The result is
  * never freed: Rune strings are immutable `const char*` values, so ownership
  * is not tracked. Treat the compiler as garbage-producing for now. */

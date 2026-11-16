@@ -8,6 +8,36 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.2.0] - 2026-11-16
+
+### Language
+
+- Arrays: `[T]` types, `[e0, e1, ...]` literals, indexing (`a[i]`,
+  `a[i] = v`, `a[i] += v`), and the `len` builtin. Values are references
+  to bounds-checked heap blocks of `[length, elems...]` slots; arrays
+  nest, cross function boundaries, and capture into closures (sharing
+  the underlying storage). Unsupported: empty literals (no inferable
+  type), comparison, and printing
+
+### Compiler
+
+- Small C runtime: bounds-checked `rune_arr_*` array helpers added
+  alongside the existing closure and string functions
+- Array elements participate in constant folding (elements are evaluated
+  eagerly, so known constants propagate into literals)
+
+### Fixed
+
+- Closure wrappers now cast pointer-typed captures (strings, arrays,
+  function values) from their i64 slots back to the parameter's type in
+  the emitted C; previously capturing a pointer value in a lambda
+  produced C that failed to compile
+
+### Tooling
+
+- Test suite (207 tests) across lexer, parser, checker, IR passes, codegen,
+  and end-to-end binaries that compile with `gcc` and check output
+
 ## [0.1.0] - 2026-11-16
 
 First tagged release.

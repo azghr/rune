@@ -98,11 +98,21 @@ impl ConstFold {
                         constants.insert(dest, result);
                     }
                 }
-                // Calls and closure creation can have side effects; leave
-                // them alone.
+                // Calls, closure creation, and memory accesses can have
+                // side effects; leave them alone. Array elements are
+                // evaluated eagerly, so known constants propagate into them
+                // like binary operands.
                 Instruction::Call { .. }
                 | Instruction::CallIndirect { .. }
-                | Instruction::MakeClosure { .. } => {}
+                | Instruction::MakeClosure { .. }
+                | Instruction::IndexGet { .. }
+                | Instruction::IndexSet { .. }
+                | Instruction::ArrLen { .. } => {}
+                Instruction::MakeArray { elems, .. } => {
+                    for elem in elems {
+                        Self::propagate(elem, &constants);
+                    }
+                }
             }
         }
 

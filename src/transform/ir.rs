@@ -72,6 +72,33 @@ pub enum Instruction {
         captures: Vec<Value>,
         ty: Type,
     },
+    /// dest = [elems...] — a heap array block of `[length, elems...]`
+    /// slots (8 bytes each). `ty` is the array's `Type::Array`.
+    MakeArray {
+        dest: String,
+        elems: Vec<Value>,
+        ty: Type,
+    },
+    /// dest = array[index] (bounds-checked). `ty` is the element type.
+    IndexGet {
+        dest: String,
+        array: Value,
+        index: Value,
+        ty: Type,
+    },
+    /// array[index] = value (bounds-checked). `ty` is the element type.
+    IndexSet {
+        array: Value,
+        index: Value,
+        value: Value,
+        ty: Type,
+    },
+    /// dest = the number of elements in `array`.
+    ArrLen {
+        dest: String,
+        array: Value,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone)]

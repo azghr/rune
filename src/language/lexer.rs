@@ -156,6 +156,14 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 TokenKind::RBrace
             }
+            '[' => {
+                self.advance();
+                TokenKind::LBracket
+            }
+            ']' => {
+                self.advance();
+                TokenKind::RBracket
+            }
             ',' => {
                 self.advance();
                 TokenKind::Comma

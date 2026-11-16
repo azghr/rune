@@ -446,3 +446,99 @@ fn recursion_and_calls_before_definition_are_accepted() {
 fn void_function_call_usable_as_a_statement() {
     analyze("fn f() { print(1) } fn main() { f() f() }");
 }
+
+#[test]
+fn accepts_well_typed_arrays() {
+    let program = analyze(
+        "fn main() {
+            let a: [int] = [1, 2, 3]
+            let s = [\"x\", \"y\"]
+            print(a[0])
+            print(s[1])
+            print(len(a))
+        }",
+    );
+    assert_eq!(program.functions.len(), 1);
+}
+
+#[test]
+fn errors_on_mixed_array_element_types() {
+    let errs = analyze_errors("fn main() { let a = [1, \"x\"] }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("array elements must have the same type"))
+    );
+}
+
+#[test]
+fn errors_on_empty_array_literal() {
+    let errs = analyze_errors("fn main() { let a = [] }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("empty array literals are not supported"))
+    );
+}
+
+#[test]
+fn errors_on_index_type_mismatch() {
+    let errs = analyze_errors("fn main() { let a = [1, 2] print(a[\"x\"]) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("array index must be `int`"))
+    );
+}
+
+#[test]
+fn errors_on_indexing_a_non_array() {
+    let errs = analyze_errors("fn main() { let n = 3 print(n[0]) }");
+    assert!(errs.iter().any(|e| {
+        e.message
+            .contains("cannot index into a value of type `int`")
+    }));
+}
+
+#[test]
+fn errors_on_assigning_wrong_element_type() {
+    let errs = analyze_errors("fn main() { let a = [1, 2] a[0] = \"x\" }");
+    assert!(errs.iter().any(|e| {
+        e.message
+            .contains("cannot assign `string` to array element of type `int`")
+    }));
+}
+
+#[test]
+fn errors_on_array_comparison() {
+    let errs = analyze_errors("fn main() { let a = [1] let b = [2] print(a == b) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("arrays cannot be compared"))
+    );
+}
+
+#[test]
+fn errors_on_len_of_non_array() {
+    let errs = analyze_errors("fn main() { print(len(3)) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("len expects an array, found `int`"))
+    );
+}
+
+#[test]
+fn errors_on_printing_an_array() {
+    let errs = analyze_errors("fn main() { let a = [1] print(a) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot print a value of type `[int]`"))
+    );
+}
+
+#[test]
+fn arrays_can_be_passed_and_returned() {
+    let program = analyze(
+        "fn sum(a: [int]) -> int { return a[0] }
+        fn make(n: int) -> [int] { return [n, n] }
+        fn main() { print(sum([4, 5])) print(make(9)[1]) }",
+    );
+    assert_eq!(program.functions.len(), 3);
+}

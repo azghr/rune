@@ -35,8 +35,36 @@ false print int bool string`
 | `bool`   | `true`, `false`                           | `bool`        |
 | `string` | immutable text values                     | `const char*` |
 | `void`   | the type of functions that return nothing | `void`        |
+| `[T]`    | arrays of `T`                             | `void*`       |
 
 Types are checked statically; there is no implicit conversion.
+
+## Arrays
+
+```rust
+let a = [10, 20, 30]    // type inferred as [int]
+let names: [string] = ["x", "y"]
+print(a[0])             // indexing reads an element
+print(len(a))           // 3
+let mut b = [1, 2]
+b[0] = 9                // element assignment
+b[1] += 5               // compound assignment works on elements too
+```
+
+- **Literals** are `[e0, e1, ...]`; all elements must have the same type,
+  and the element type is inferred from them. Empty literals are rejected
+  (there is no way to name their type yet).
+- **Semantics**: an array value is a reference to a heap block holding its
+  length and elements. Arrays can be passed to and returned from functions,
+  stored in other arrays (nested `[int]`), and captured by closures — all
+  sharing the same underlying storage.
+- **Mutability**: element writes go through the reference and are always
+  allowed, like C arrays behind a pointer. Only rebinding the *variable*
+  needs `let mut` (`a = [4, 5]` on an immutable `a` is an error).
+- **Bounds**: every access is checked at runtime; an out-of-bounds index
+  prints a diagnostic and aborts the program.
+- **Restrictions**: arrays cannot be compared with `==`/`!=` (element-wise
+  comparison does not exist yet) and cannot be printed.
 
 ## Variables
 
@@ -138,6 +166,7 @@ fn fib(n: int) -> int {
 
 ## Builtin functions
 
+- `len(arr)` — returns the number of elements in an array as an `int`.
 - `print(expr)` — prints an `int`, `bool`, or `string` followed by a
   newline. Takes exactly one argument; `void` values cannot be printed.
   Strings compare and concatenate but cannot be printed with escapes
@@ -152,7 +181,7 @@ definition order never matters.
 
 ## Current limitations
 
-- No arrays, structs, tuples, or containers of any kind
+- No structs or tuples (arrays exist; see above)
 - No generics
 - No type inference beyond `let` bindings; no enums or sum types
 - Concatenated strings are heap-allocated and never freed (no ownership

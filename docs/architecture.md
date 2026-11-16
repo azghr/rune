@@ -262,8 +262,11 @@ libraries, keeping the zero-dependency rule intact.
 ## Runtime (`runtime/`)
 
 `rune_rt.c` / `rune_rt.h` are a handful of small C functions linked into every
-built program: the `rune_print_*` functions and `rune_strcat` (string
-concatenation). Concatenation results are heap-allocated and never freed —
+built program: the `rune_print_*` functions, `rune_strcat` (string
+concatenation), `rune_closure_*` (closure blocks), and the bounds-checked
+`rune_arr_*` array helpers. Arrays and closures share one layout convention —
+a block of 8-byte slots — arrays as `[length, elems...]` and closures as
+`[code word, captures...]`. Concatenation results are heap-allocated and never freed —
 Rune does not track string ownership, so the compiler currently leaks
 concatenated strings by design. The CLI compiles with:
 

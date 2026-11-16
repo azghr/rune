@@ -419,3 +419,67 @@ fn analysis_errors_stop_the_pipeline() {
         .expect_err("type mismatch should fail");
     assert!(err.contains("compilation failed"));
 }
+
+#[test]
+fn arrays_work_end_to_end() {
+    let out = run_program(
+        "fn sum(a: [int]) -> int {
+            let mut total = 0
+            let mut i = 0
+            while i < len(a) {
+                total += a[i]
+                i += 1
+            }
+            return total
+        }
+        fn make_pair(n: int) -> [int] {
+            return [n, n * 2]
+        }
+        fn main() {
+            let a = [1, 2, 3]
+            print(sum(a))
+            print(a[2])
+            let mut b = [10, 20]
+            b[0] += 5
+            b[1] = b[0] * 2
+            print(b[0])
+            print(b[1])
+            let words = [\"hey\", \"ho\"]
+            print(words[0] + \"!\")
+            let p = make_pair(7)
+            print(p[0])
+            print(p[1])
+            let m = [[1, 2], [3, 4]]
+            print(m[1][0])
+        }",
+    );
+    assert_eq!(out, "6\n3\n15\n30\nhey!\n7\n14\n3\n");
+}
+
+#[test]
+fn array_out_of_bounds_aborts() {
+    let c_code = Compiler::compile("test.rune", "fn main() { let a = [1, 2] print(a[9]) }")
+        .expect("compilation should succeed");
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let c_path = std::env::temp_dir().join(format!("rune_it_{id}.c"));
+    let bin_path = std::env::temp_dir().join(format!("rune_it_{id}"));
+    std::fs::write(&c_path, &c_code).expect("write C");
+    let status = std::process::Command::new("gcc")
+        .args([
+            c_path.to_str().unwrap(),
+            &format!("{}/runtime/rune_rt.c", env!("CARGO_MANIFEST_DIR")),
+            "-o",
+            bin_path.to_str().unwrap(),
+            "-I",
+            env!("CARGO_MANIFEST_DIR"),
+        ])
+        .status()
+        .expect("run gcc");
+    assert!(status.success());
+    let run = std::process::Command::new(&bin_path)
+        .output()
+        .expect("run binary");
+    assert!(!run.status.success(), "out-of-bounds access should abort");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("array index 9 out of bounds"));
+}

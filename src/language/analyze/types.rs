@@ -27,5 +27,6 @@ pub fn type_name(ty: &Type) -> String {
             let params = params.iter().map(type_name).collect::<Vec<_>>().join(", ");
             format!("fn({}) -> {}", params, type_name(return_type))
         }
+        Type::Array(elem) => format!("[{}]", type_name(elem)),
     }
 }

@@ -198,6 +198,11 @@ fn generated_wat_is_valid_wasm() {
             fn main() { print(apply(inc, 5)) }",
         ),
         (
+            "arrays",
+            "fn sum(a: [int]) -> int { let mut t = 0 let mut i = 0 while i < len(a) { t += a[i] i += 1 } return t }
+            fn main() { let a = [1, 2, 3] print(sum(a)) a[1] = 40 print(a[1]) let s = [\"x\"] print(s[0]) }",
+        ),
+        (
             "void_lambda_statement",
             "fn g(n: int) -> int { return n } fn main() { g(1) let f = fn(x: int) { print(x) } f(2) }",
         ),
@@ -220,4 +225,27 @@ fn generated_wat_is_valid_wasm() {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("wasm"));
     }
+}
+
+#[test]
+fn arrays_use_wat_runtime_helpers() {
+    let out = wat("fn main() { let a = [10, 20] print(a[1]) print(len(a)) }");
+    // allocation goes through the prelude's bump allocator; the length is
+    // the first slot
+    assert!(out.contains("i64.const 2"));
+    assert!(out.contains("call $f_rune_arr_new"));
+    // element stores pass the index and value to the bounds-checked setter
+    assert!(out.contains("call $f_rune_arr_set"));
+    // len reads the length slot directly
+    assert!(out.contains("i64.load"));
+    // reads narrow the i64 slot back to the element type
+    assert!(out.contains("call $f_rune_arr_get"));
+}
+
+#[test]
+fn string_array_elements_get_widened_and_narrowed() {
+    let out = wat("fn main() { let s = [\"a\"] print(s[0]) }");
+    assert!(out.contains("i64.extend_i32_u"));
+    assert!(out.contains("i32.wrap_i64"));
+    assert!(out.contains("(data (i32.const 1024) \"a\\00\")"));
 }

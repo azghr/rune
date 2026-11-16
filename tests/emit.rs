@@ -175,3 +175,47 @@ fn generates_the_full_fib_program() {
     assert!(c.contains("fib((n - 1))"));
     assert!(c.contains("return 0;"));
 }
+
+#[test]
+fn arrays_use_the_runtime_helpers() {
+    // Through the real IR pipeline: array literals, reads, writes, and len
+    // all go through rune_arr_* helpers.
+    let c = common::compile(
+        "fn main() {
+            let a = [1, 2, 3]
+            print(a[1])
+            let mut b = [4]
+            b[0] += 5
+            print(b[0])
+            print(len(a))
+        }",
+    )
+    .expect("compiles");
+    // arrays are void* blocks; the literal allocates via the runtime
+    assert!(c.contains("void* a;"));
+    assert!(c.contains("= rune_arr_new(3);"));
+    assert!(c.contains("rune_arr_set(t0, 0, (int64_t)(1));"));
+    // reads narrow back; string/array elements get an explicit cast
+    assert!(c.contains("= rune_arr_get(a, 1);"));
+    assert!(c.contains("rune_arr_set(b, 0, (int64_t)("));
+    assert!(c.contains("= rune_arr_len(a);"));
+}
+
+#[test]
+fn pointer_captures_are_cast_back_in_wrappers() {
+    // string and array captures are stored as i64 slots; the env-first
+    // wrapper must cast them back to the parameter's pointer type.
+    let c = common::compile(
+        "fn main() {
+            let s = \"hi\"
+            let f = fn() -> string { return s }
+            print(f())
+            let a = [1]
+            let g = fn() -> int { return a[0] }
+            print(g())
+        }",
+    )
+    .expect("compiles");
+    assert!(c.contains("(const char*)((int64_t *)env)[1]"));
+    assert!(c.contains("(void*)((int64_t *)env)[1]"));
+}

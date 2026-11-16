@@ -28,6 +28,7 @@ impl Parser {
                 | TokenKind::Print
                 | TokenKind::Fn
                 | TokenKind::LParen
+                | TokenKind::LBracket
                 | TokenKind::Minus
                 | TokenKind::Bang
         )
@@ -58,24 +59,40 @@ impl Parser {
         } else {
             // Expression statement or assignment
             let expr = self.parse_expression()?;
-            if let Expr::Variable { name, span } = &expr
-                && self.matches(&[
-                    TokenKind::Eq,
-                    TokenKind::PlusEq,
-                    TokenKind::MinusEq,
-                    TokenKind::StarEq,
-                    TokenKind::SlashEq,
-                    TokenKind::PercentEq,
-                ])
-            {
+            let assignment_op = if self.matches(&[
+                TokenKind::Eq,
+                TokenKind::PlusEq,
+                TokenKind::MinusEq,
+                TokenKind::StarEq,
+                TokenKind::SlashEq,
+                TokenKind::PercentEq,
+            ]) {
                 // The operator doubles as the AST's `op`: `Eq` is plain
                 // assignment, the rest are compound assignments.
-                let op = self.previous().kind.clone();
+                Some(self.previous().kind.clone())
+            } else {
+                None
+            };
+            if let (Some(op), Expr::Variable { name, span }) = (assignment_op.clone(), &expr) {
                 let value = self.parse_expression()?;
                 let value_span = value.span();
                 self.end_of_statement();
                 return Ok(Stmt::Assign {
                     name: name.clone(),
+                    op,
+                    value,
+                    span: span.merge(value_span),
+                });
+            }
+            if let (Some(op), Expr::Index { array, index, span }) = (assignment_op, &expr) {
+                // `a[i] = v` (or a compound form); the array expression is
+                // evaluated once.
+                let value = self.parse_expression()?;
+                let value_span = value.span();
+                self.end_of_statement();
+                return Ok(Stmt::IndexAssign {
+                    array: array.clone(),
+                    index: index.clone(),
                     op,
                     value,
                     span: span.merge(value_span),
@@ -241,6 +258,12 @@ impl Parser {
             TokenKind::IntType => Ok(crate::language::ast::Type::Int),
             TokenKind::Bool => Ok(crate::language::ast::Type::Bool),
             TokenKind::StringType => Ok(crate::language::ast::Type::String),
+            TokenKind::LBracket => {
+                // Array type: [elem].
+                let elem = self.parse_type()?;
+                self.consume(TokenKind::RBracket, "expected `]` after array element type")?;
+                Ok(crate::language::ast::Type::Array(Box::new(elem)))
+            }
             TokenKind::Fn => {
                 // Function type: fn(param, ...) -> ret (the arrow clause is
                 // optional and defaults to void).

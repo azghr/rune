@@ -104,6 +104,32 @@ const RUNE_RUNTIME: &str = r#"
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $next)))
     (i32.sub (local.get $ca) (local.get $cb)))
+
+  ;; Arrays: blocks of [length, elems...] with one 8-byte slot per
+  ;; element, mirroring the C runtime. Bounds violations trap.
+  (func $f_rune_arr_new (param $n i64) (result i32) (local $arr i32)
+    (local.set $arr (call $f_rune_alloc (i32.add (i32.wrap_i64 (i64.mul (local.get $n) (i64.const 8))) (i32.const 8))))
+    (i64.store (local.get $arr) (local.get $n))
+    (local.get $arr))
+
+  (func $f_rune_arr_check (param $arr i32) (param $idx i64)
+    (if (i64.lt_s (local.get $idx) (i64.const 0))
+      (then unreachable))
+    (if (i64.ge_u (local.get $idx) (i64.load (local.get $arr)))
+      (then unreachable)))
+
+  (func $f_rune_arr_get (param $arr i32) (param $idx i64) (result i64)
+    (call $f_rune_arr_check (local.get $arr) (local.get $idx))
+    (i64.load offset=8
+      (i32.add (local.get $arr)
+               (i32.wrap_i64 (i64.mul (local.get $idx) (i64.const 8))))))
+
+  (func $f_rune_arr_set (param $arr i32) (param $idx i64) (param $v i64)
+    (call $f_rune_arr_check (local.get $arr) (local.get $idx))
+    (i64.store offset=8
+      (i32.add (local.get $arr)
+               (i32.wrap_i64 (i64.mul (local.get $idx) (i64.const 8))))
+      (local.get $v)))
 "#;
 
 /// Module-level emission context: string literals, the closure table
@@ -217,6 +243,7 @@ fn wasm_type(ty: &Type) -> &'static str {
         Type::Void => "",
         Type::String => "i32", // pointer into linear memory
         Type::Function { .. } => "i32",
+        Type::Array(_) => "i32",
     }
 }
 
@@ -269,9 +296,13 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                 | Instruction::CallIndirect {
                     dest: Some(dest), ..
                 }
-                | Instruction::MakeClosure { dest, .. } => dest,
+                | Instruction::MakeClosure { dest, .. }
+                | Instruction::MakeArray { dest, .. }
+                | Instruction::IndexGet { dest, .. }
+                | Instruction::ArrLen { dest, .. } => dest,
                 Instruction::Call { dest: None, .. }
-                | Instruction::CallIndirect { dest: None, .. } => continue,
+                | Instruction::CallIndirect { dest: None, .. }
+                | Instruction::IndexSet { .. } => continue,
             };
             if !types.iter().any(|(n, _)| n == dest) {
                 let ty = match inst {
@@ -284,9 +315,13 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                     | Instruction::CallIndirect {
                         dest: Some(_), ty, ..
                     }
-                    | Instruction::MakeClosure { ty, .. } => ty.clone(),
+                    | Instruction::MakeClosure { ty, .. }
+                    | Instruction::MakeArray { ty, .. }
+                    | Instruction::IndexGet { ty, .. }
+                    | Instruction::ArrLen { ty, .. } => ty.clone(),
                     Instruction::Call { dest: None, .. }
-                    | Instruction::CallIndirect { dest: None, .. } => {
+                    | Instruction::CallIndirect { dest: None, .. }
+                    | Instruction::IndexSet { .. } => {
                         continue;
                     }
                 };
@@ -531,6 +566,58 @@ fn emit_instruction(
                 let _ = writeln!(out, "{ind}i64.store offset={}", closure_capture_offset(i));
             }
         }
+        Instruction::MakeArray { dest, elems, .. } => {
+            // Allocate an array block of [length, elems...] 8-byte slots,
+            // mirroring the C runtime's rune_arr_new/rune_arr_set.
+            let _ = writeln!(out, "{ind}i64.const {}", elems.len());
+            let _ = writeln!(out, "{ind}call $f_rune_arr_new");
+            let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
+            for (i, elem) in elems.iter().enumerate() {
+                let elem_ty = value_type(elem, locals);
+                let _ = writeln!(out, "{ind}local.get {}", local_ref(dest));
+                let _ = writeln!(out, "{ind}i64.const {i}");
+                emit_value(out, elem, ind, locals, ctx);
+                if elem_ty != Type::Int {
+                    let _ = writeln!(out, "{ind}i64.extend_i32_u");
+                }
+                let _ = writeln!(out, "{ind}call $f_rune_arr_set");
+            }
+        }
+        Instruction::IndexGet {
+            dest,
+            array,
+            index,
+            ty,
+        } => {
+            // Bounds-checked read returning an i64 slot; narrow back to the
+            // element's wasm type (pointers are i32).
+            emit_value(out, array, ind, locals, ctx);
+            emit_value(out, index, ind, locals, ctx);
+            let _ = writeln!(out, "{ind}call $f_rune_arr_get");
+            if *ty != Type::Int {
+                let _ = writeln!(out, "{ind}i32.wrap_i64");
+            }
+            let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
+        }
+        Instruction::IndexSet {
+            array,
+            index,
+            value,
+            ty,
+        } => {
+            emit_value(out, array, ind, locals, ctx);
+            emit_value(out, index, ind, locals, ctx);
+            emit_value(out, value, ind, locals, ctx);
+            if *ty != Type::Int {
+                let _ = writeln!(out, "{ind}i64.extend_i32_u");
+            }
+            let _ = writeln!(out, "{ind}call $f_rune_arr_set");
+        }
+        Instruction::ArrLen { dest, array, .. } => {
+            emit_value(out, array, ind, locals, ctx);
+            let _ = writeln!(out, "{ind}i64.load");
+            let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
+        }
     }
 }
 
@@ -638,6 +725,22 @@ fn collect_string_literals(module: &Module) -> Vec<(u32, String)> {
                         for cap in captures {
                             check_value(cap);
                         }
+                    }
+                    Instruction::MakeArray { elems, .. } => {
+                        for elem in elems {
+                            check_value(elem);
+                        }
+                    }
+                    Instruction::IndexGet { array, index, .. }
+                    | Instruction::IndexSet { array, index, .. } => {
+                        check_value(array);
+                        check_value(index);
+                        if let Instruction::IndexSet { value, .. } = inst {
+                            check_value(value);
+                        }
+                    }
+                    Instruction::ArrLen { array, .. } => {
+                        check_value(array);
                     }
                 }
             }

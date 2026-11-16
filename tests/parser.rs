@@ -399,3 +399,73 @@ fn errors_on_expected_expression() {
     let err = common::parse_error("fn main() { let x = }");
     assert!(err.message.contains("expected expression"));
 }
+
+#[test]
+fn parses_array_types() {
+    let func = only_function("fn f(a: [int], b: [[string]]) {}");
+    assert_eq!(func.params[0].ty, Type::Array(Box::new(Type::Int)));
+    assert_eq!(
+        func.params[1].ty,
+        Type::Array(Box::new(Type::Array(Box::new(Type::String))))
+    );
+}
+
+#[test]
+fn parses_array_literals_and_indexing() {
+    let func = only_function("fn main() { let a = [1, 2, 3] print(a[1]) }");
+    let Stmt::Let { value, .. } = &func.body.statements[0] else {
+        panic!("expected a let");
+    };
+    let Expr::ArrayLiteral { elems, .. } = value else {
+        panic!("expected an array literal");
+    };
+    assert_eq!(elems.len(), 3);
+
+    let Stmt::Expr(expr) = &func.body.statements[1] else {
+        panic!("expected an expression statement");
+    };
+    let Expr::Call { args, .. } = expr else {
+        panic!("expected a print call");
+    };
+    assert!(matches!(&args[0], Expr::Index { .. }));
+}
+
+#[test]
+fn parses_index_assignment_and_chained_indexing() {
+    let func = only_function("fn main() { let mut a = [1] a[0] += 2 let m = [[1]] m[0][0] = 7 }");
+    assert!(matches!(
+        &func.body.statements[1],
+        Stmt::IndexAssign {
+            op: TokenKind::PlusEq,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &func.body.statements[3],
+        Stmt::IndexAssign {
+            op: TokenKind::Eq,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parses_indexing_on_call_results() {
+    let func = only_function("fn main() { print(make(1)[0]) }");
+    let Stmt::Expr(expr) = &func.body.statements[0] else {
+        panic!("expected an expression statement");
+    };
+    let Expr::Call { args, .. } = expr else {
+        panic!("expected a print call");
+    };
+    let Expr::Index { array, .. } = &args[0] else {
+        panic!("expected an index expression");
+    };
+    assert!(matches!(array.as_ref(), Expr::Call { .. }));
+}
+
+#[test]
+fn array_literal_requires_closing_bracket() {
+    let err = common::parse_error("fn main() { let a = [1, 2 }");
+    assert!(err.message.contains("expected `]`"));
+}

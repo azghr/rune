@@ -93,12 +93,22 @@ fn emit_closure_wrapper(out: &mut String, target: &Function, n_caps: usize) {
         out.push_str(name);
     }
     // Captures live in the closure block after the code word
-    // (rune_closure_set stores them at index i + 1).
-    for (i, _) in target.params[n_user..].iter().enumerate() {
+    // (rune_closure_set stores them at index i + 1) as raw i64 slots;
+    // pointer-typed captures need a cast back to their parameter type.
+    for (i, (_, ty)) in target.params[n_user..].iter().enumerate() {
         if i > 0 || n_user > 0 {
             out.push_str(", ");
         }
-        let _ = write!(out, "((int64_t *)env)[{}]", i + 1);
+        let slot = format!("((int64_t *)env)[{}]", i + 1);
+        if matches!(
+            super::ctype::c_value_type(ty),
+            Some("const char*") | Some("void*")
+        ) {
+            let cast = super::ctype::c_value_type(ty).unwrap_or("int64_t");
+            let _ = write!(out, "({cast}){slot}");
+        } else {
+            out.push_str(&slot);
+        }
     }
     out.push_str(");\n}\n\n");
 }
@@ -169,9 +179,13 @@ fn local_types(func: &Function) -> HashMap<&str, Type> {
                     ty,
                     ..
                 }
-                | Instruction::MakeClosure { dest, ty, .. } => (dest.as_str(), ty.clone()),
+                | Instruction::MakeClosure { dest, ty, .. }
+                | Instruction::MakeArray { dest, ty, .. }
+                | Instruction::IndexGet { dest, ty, .. }
+                | Instruction::ArrLen { dest, ty, .. } => (dest.as_str(), ty.clone()),
                 Instruction::Call { dest: None, .. }
-                | Instruction::CallIndirect { dest: None, .. } => continue,
+                | Instruction::CallIndirect { dest: None, .. }
+                | Instruction::IndexSet { .. } => continue,
             };
             types.entry(dest).or_insert(ty);
         }
@@ -371,6 +385,57 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
                 emit_value(out, cap);
                 out.push_str("));\n");
             }
+        }
+        Instruction::MakeArray { dest, elems, .. } => {
+            // Allocate an array block: [length, elems...]. Elements go in
+            // as raw i64 slots, widened where needed.
+            let _ = writeln!(out, "{} = rune_arr_new({});", dest, elems.len());
+            for (idx, elem) in elems.iter().enumerate() {
+                let _ = write!(out, "rune_arr_set({}, {}, (int64_t)(", dest, idx);
+                emit_value(out, elem);
+                out.push_str("));\n");
+            }
+        }
+        Instruction::IndexGet {
+            dest,
+            array,
+            index,
+            ty,
+        } => {
+            // Bounds-checked reads return i64 slots; narrow back to the
+            // element's C type (pointers need an explicit cast).
+            let _ = write!(out, "{} = ", dest);
+            if matches!(
+                super::ctype::c_value_type(ty),
+                Some("const char*") | Some("void*")
+            ) {
+                let cast = super::ctype::c_value_type(ty).unwrap_or("int64_t");
+                let _ = write!(out, "({cast})");
+            }
+            out.push_str("rune_arr_get(");
+            emit_value(out, array);
+            out.push_str(", ");
+            emit_value(out, index);
+            out.push_str(");\n");
+        }
+        Instruction::IndexSet {
+            array,
+            index,
+            value,
+            ..
+        } => {
+            out.push_str("rune_arr_set(");
+            emit_value(out, array);
+            out.push_str(", ");
+            emit_value(out, index);
+            out.push_str(", (int64_t)(");
+            emit_value(out, value);
+            out.push_str("));\n");
+        }
+        Instruction::ArrLen { dest, array, .. } => {
+            let _ = write!(out, "{} = rune_arr_len(", dest);
+            emit_value(out, array);
+            out.push_str(");\n");
         }
     }
 }

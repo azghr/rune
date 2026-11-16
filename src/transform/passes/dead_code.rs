@@ -83,10 +83,14 @@ impl DeadCodeElim {
         match inst {
             Instruction::Binary { dest, .. }
             | Instruction::Unary { dest, .. }
-            | Instruction::Move { dest, .. } => Some(dest.clone()),
+            | Instruction::Move { dest, .. }
+            | Instruction::MakeArray { dest, .. }
+            | Instruction::IndexGet { dest, .. }
+            | Instruction::ArrLen { dest, .. } => Some(dest.clone()),
             Instruction::Call { .. }
             | Instruction::CallIndirect { .. }
-            | Instruction::MakeClosure { .. } => None,
+            | Instruction::MakeClosure { .. }
+            | Instruction::IndexSet { .. } => None,
         }
     }
 
@@ -116,6 +120,22 @@ impl DeadCodeElim {
                     Self::push_value_uses(cap, &mut uses);
                 }
             }
+            Instruction::MakeArray { elems, .. } => {
+                for elem in elems {
+                    Self::push_value_uses(elem, &mut uses);
+                }
+            }
+            Instruction::IndexGet { array, index, .. }
+            | Instruction::IndexSet { array, index, .. } => {
+                Self::push_value_uses(array, &mut uses);
+                Self::push_value_uses(index, &mut uses);
+                if let Instruction::IndexSet { value, .. } = inst {
+                    Self::push_value_uses(value, &mut uses);
+                }
+            }
+            Instruction::ArrLen { array, .. } => {
+                Self::push_value_uses(array, &mut uses);
+            }
         }
         uses
     }
@@ -144,6 +164,9 @@ impl DeadCodeElim {
                 Instruction::Call { .. }
                     | Instruction::CallIndirect { .. }
                     | Instruction::MakeClosure { .. }
+                    // Array writes and allocations have side effects.
+                    | Instruction::MakeArray { .. }
+                    | Instruction::IndexSet { .. }
             ) || Self::dest_of(inst).is_some_and(|dest| live.contains(&dest));
 
             if keep {

@@ -378,6 +378,61 @@ fn lower_statement(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, stmt: &
                 });
             }
         }
+        Stmt::IndexAssign {
+            array,
+            index,
+            op,
+            value,
+            ..
+        } => {
+            // The array expression is evaluated exactly once.
+            let (array, array_ty) = lower_expr(builder, lowerer, array);
+            let (index, _) = lower_expr(builder, lowerer, index);
+            let Type::Array(elem_ty) = array_ty else {
+                unreachable!("checker validated the index target is an array");
+            };
+            if *op == TokenKind::Eq {
+                let (value, _) = lower_expr(builder, lowerer, value);
+                builder.push(Instruction::IndexSet {
+                    array,
+                    index,
+                    value,
+                    ty: (*elem_ty).clone(),
+                });
+            } else {
+                // `a[i] <op>= v` becomes `a[i] = a[i] <op> v`:
+                // read, combine, write.
+                let (value, _) = lower_expr(builder, lowerer, value);
+                let read = builder.fresh_temp();
+                builder.push(Instruction::IndexGet {
+                    dest: read.clone(),
+                    array: array.clone(),
+                    index: index.clone(),
+                    ty: (*elem_ty).clone(),
+                });
+                let result_ty = if *op == TokenKind::PlusEq && *elem_ty == Type::String {
+                    // String `+` is concatenation; the IR binary's result
+                    // type tracks string-ness.
+                    Type::String
+                } else {
+                    Type::Int
+                };
+                let combined = builder.fresh_temp();
+                builder.push(Instruction::Binary {
+                    dest: combined.clone(),
+                    left: Value::Local(read),
+                    op: bin_op(op),
+                    right: value,
+                    ty: result_ty,
+                });
+                builder.push(Instruction::IndexSet {
+                    array,
+                    index,
+                    value: Value::Local(combined),
+                    ty: (*elem_ty).clone(),
+                });
+            }
+        }
         Stmt::Expr(expr) => {
             // Statement expressions only need the side effects.
             match expr {
@@ -599,6 +654,42 @@ fn lower_expr(builder: &mut FuncBuilder, lowerer: &mut ExprLowerer, expr: &Expr)
             });
             (Value::Local(dest), ty)
         }
+        Expr::ArrayLiteral { elems, .. } => {
+            // Allocate a heap block of [length, elems...] slots; the checker
+            // guarantees at least one element and a uniform element type.
+            let mut values = Vec::with_capacity(elems.len());
+            let mut elem_ty = Type::Void;
+            for (i, elem) in elems.iter().enumerate() {
+                let (value, ty) = lower_expr(builder, lowerer, elem);
+                if i == 0 {
+                    elem_ty = ty;
+                }
+                values.push(value);
+            }
+            let ty = Type::Array(Box::new(elem_ty));
+            let dest = builder.fresh_temp();
+            builder.push(Instruction::MakeArray {
+                dest: dest.clone(),
+                elems: values,
+                ty: ty.clone(),
+            });
+            (Value::Local(dest), ty)
+        }
+        Expr::Index { array, index, .. } => {
+            let (array, array_ty) = lower_expr(builder, lowerer, array);
+            let (index, _) = lower_expr(builder, lowerer, index);
+            let Type::Array(elem_ty) = array_ty else {
+                unreachable!("checker validated the indexed value is an array");
+            };
+            let dest = builder.fresh_temp();
+            builder.push(Instruction::IndexGet {
+                dest: dest.clone(),
+                array,
+                index,
+                ty: *elem_ty.clone(),
+            });
+            (Value::Local(dest), *elem_ty)
+        }
         Expr::Call { .. } => lower_call(builder, lowerer, expr, true),
         Expr::AnonymousFunction {
             params,
@@ -719,6 +810,18 @@ fn lower_call(
         Expr::Variable { name, .. } => Some(name.clone()),
         _ => None,
     };
+
+    // `len(a)` is a builtin over arrays, like `print` is over printable
+    // values; it lowers to its own instruction instead of a call.
+    if callee_name.as_deref() == Some("len") {
+        let dest = builder.fresh_temp();
+        builder.push(Instruction::ArrLen {
+            dest: dest.clone(),
+            array: values.first().cloned().unwrap_or(Value::ConstInt(0)),
+            ty: Type::Int,
+        });
+        return (Value::Local(dest), Type::Int);
+    }
     // The callee is lowered at most once, here: a plain name needs no value
     // unless it resolves to a function-typed local, any other expression
     // produces the function value to call.
@@ -821,6 +924,18 @@ fn walk_capture_reads(
                 walk_capture_expr(value, declared, lowerer, captures, seen);
             }
             Stmt::Assign { value, .. } => {
+                walk_capture_expr(value, declared, lowerer, captures, seen);
+            }
+            Stmt::IndexAssign {
+                array,
+                index,
+                value,
+                ..
+            } => {
+                // Reading the array and the index captures them (the array
+                // by pointer); the written value too.
+                walk_capture_expr(array, declared, lowerer, captures, seen);
+                walk_capture_expr(index, declared, lowerer, captures, seen);
                 walk_capture_expr(value, declared, lowerer, captures, seen);
             }
             Stmt::Expr(expr) => {
@@ -927,6 +1042,15 @@ fn walk_capture_expr(
             for arg in args {
                 walk_capture_expr(arg, declared, lowerer, captures, seen);
             }
+        }
+        Expr::ArrayLiteral { elems, .. } => {
+            for elem in elems {
+                walk_capture_expr(elem, declared, lowerer, captures, seen);
+            }
+        }
+        Expr::Index { array, index, .. } => {
+            walk_capture_expr(array, declared, lowerer, captures, seen);
+            walk_capture_expr(index, declared, lowerer, captures, seen);
         }
         _ => {}
     }

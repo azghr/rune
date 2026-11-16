@@ -21,6 +21,8 @@ pub fn c_decl(ty: &Type, name: &str) -> String {
         // Function values are closure pointers (see rune_rt.h) regardless
         // of their signature.
         Type::Function { .. } => format!("void* {}", name),
+        // Arrays are pointers to [length, elems...] blocks (see rune_rt.h).
+        Type::Array(_) => format!("void* {}", name),
     }
 }
 
@@ -39,5 +41,6 @@ pub fn c_value_type(ty: &Type) -> Option<&'static str> {
         Type::String => Some("const char*"),
         Type::Void => Some("void"),
         Type::Function { .. } => Some("void*"),
+        Type::Array(_) => Some("void*"),
     }
 }

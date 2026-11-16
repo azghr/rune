@@ -36,6 +36,10 @@ pub fn generate(module: &Module) -> String {
     out.push_str("declare i32 @strcmp(ptr, ptr)\n");
     out.push_str("declare ptr @rune_closure_new(ptr, i32)\n");
     out.push_str("declare void @rune_closure_set(ptr, i32, i64)\n");
+    out.push_str("declare ptr @rune_arr_new(i64)\n");
+    out.push_str("declare i64 @rune_arr_len(ptr)\n");
+    out.push_str("declare i64 @rune_arr_get(ptr, i64)\n");
+    out.push_str("declare void @rune_arr_set(ptr, i64, i64)\n");
 
     // LLVM textual IR is not order-sensitive, so no forward declarations
     // are needed.
@@ -86,7 +90,7 @@ fn llvm_type(ty: &Type) -> &'static str {
         Type::Int => "i64",
         Type::Bool => "i1",
         Type::Void => "void",
-        Type::String | Type::Function { .. } => "ptr",
+        Type::String | Type::Function { .. } | Type::Array(_) => "ptr",
     }
 }
 
@@ -169,6 +173,22 @@ fn collect_string_literals(module: &Module) -> Vec<(String, String, u32)> {
                         for cap in captures {
                             check_value(cap, &mut out);
                         }
+                    }
+                    Instruction::MakeArray { elems, .. } => {
+                        for elem in elems {
+                            check_value(elem, &mut out);
+                        }
+                    }
+                    Instruction::IndexGet { array, index, .. }
+                    | Instruction::IndexSet { array, index, .. } => {
+                        check_value(array, &mut out);
+                        check_value(index, &mut out);
+                        if let Instruction::IndexSet { value, .. } = inst {
+                            check_value(value, &mut out);
+                        }
+                    }
+                    Instruction::ArrLen { array, .. } => {
+                        check_value(array, &mut out);
                     }
                 }
             }
@@ -598,6 +618,75 @@ impl Emitter<'_> {
                     );
                 }
             }
+            Instruction::MakeArray { dest, elems, .. } => {
+                // Allocate an array block of [length, elems...] 8-byte slots,
+                // mirroring the C runtime's rune_arr_new/rune_arr_set.
+                let arr = self.fresh();
+                let _ = writeln!(out, "  {arr} = call ptr @rune_arr_new(i64 {})", elems.len());
+                let _ = writeln!(out, "  store ptr {arr}, ptr {}", Self::local_ref(dest));
+                for (idx, elem) in elems.iter().enumerate() {
+                    let v = self.value(out, elem);
+                    let elem_ty = value_type(elem, self.locals);
+                    let wide = self.widen_to_i64(out, &v, &elem_ty);
+                    let _ = writeln!(
+                        out,
+                        "  call void @rune_arr_set(ptr {arr}, i64 {idx}, i64 {wide})"
+                    );
+                }
+            }
+            Instruction::IndexGet {
+                dest,
+                array,
+                index,
+                ty,
+            } => {
+                // Bounds-checked read returning an i64 slot; narrow back to
+                // the element's LLVM type (pointers come back via inttoptr).
+                let a = self.value(out, array);
+                let i = self.value(out, index);
+                let raw = self.fresh();
+                let _ = writeln!(out, "  {raw} = call i64 @rune_arr_get(ptr {a}, i64 {i})");
+                let narrowed = match ty {
+                    Type::Int => raw,
+                    Type::Bool => {
+                        let r = self.fresh();
+                        let _ = writeln!(out, "  {r} = trunc i64 {raw} to i1");
+                        r
+                    }
+                    _ => {
+                        let r = self.fresh();
+                        let _ = writeln!(out, "  {r} = inttoptr i64 {raw} to ptr");
+                        r
+                    }
+                };
+                let _ = writeln!(
+                    out,
+                    "  store {} {narrowed}, ptr {}",
+                    llvm_type(ty),
+                    Self::local_ref(dest)
+                );
+            }
+            Instruction::IndexSet {
+                array,
+                index,
+                value,
+                ty,
+            } => {
+                let a = self.value(out, array);
+                let i = self.value(out, index);
+                let v = self.value(out, value);
+                let wide = self.widen_to_i64(out, &v, ty);
+                let _ = writeln!(
+                    out,
+                    "  call void @rune_arr_set(ptr {a}, i64 {i}, i64 {wide})"
+                );
+            }
+            Instruction::ArrLen { dest, array, .. } => {
+                let a = self.value(out, array);
+                let len = self.fresh();
+                let _ = writeln!(out, "  {len} = call i64 @rune_arr_len(ptr {a})");
+                let _ = writeln!(out, "  store i64 {len}, ptr {}", Self::local_ref(dest));
+            }
         }
     }
 
@@ -689,9 +778,13 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                 | Instruction::CallIndirect {
                     dest: Some(dest), ..
                 }
-                | Instruction::MakeClosure { dest, .. } => dest,
+                | Instruction::MakeClosure { dest, .. }
+                | Instruction::MakeArray { dest, .. }
+                | Instruction::IndexGet { dest, .. }
+                | Instruction::ArrLen { dest, .. } => dest,
                 Instruction::Call { dest: None, .. }
-                | Instruction::CallIndirect { dest: None, .. } => continue,
+                | Instruction::CallIndirect { dest: None, .. }
+                | Instruction::IndexSet { .. } => continue,
             };
             if !types.iter().any(|(n, _)| n == dest) {
                 let ty = match inst {
@@ -704,9 +797,13 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                     | Instruction::CallIndirect {
                         dest: Some(_), ty, ..
                     }
-                    | Instruction::MakeClosure { ty, .. } => ty.clone(),
+                    | Instruction::MakeClosure { ty, .. }
+                    | Instruction::MakeArray { ty, .. }
+                    | Instruction::IndexGet { ty, .. }
+                    | Instruction::ArrLen { ty, .. } => ty.clone(),
                     Instruction::Call { dest: None, .. }
-                    | Instruction::CallIndirect { dest: None, .. } => continue,
+                    | Instruction::CallIndirect { dest: None, .. }
+                    | Instruction::IndexSet { .. } => continue,
                 };
                 types.push((dest.clone(), ty));
             }

@@ -480,3 +480,87 @@ fn programs_through_the_full_pass_pipeline_stay_equivalent() {
     lowered(include_str!("../examples/fib.rune"));
     lowered(include_str!("../examples/hello.rune"));
 }
+
+#[test]
+fn array_literals_lower_to_make_array() {
+    let module = lower("fn main() { let a = [1, 2, 3] print(a[1]) }");
+    let main = &module.functions[0];
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::MakeArray { elems, ty: Type::Array(inner), .. }
+            if elems.len() == 3 && **inner == Type::Int
+    )));
+}
+
+#[test]
+fn index_reads_lower_to_index_get() {
+    let module = lower("fn main() { let a = [1, 2] print(a[1]) }");
+    let main = &module.functions[0];
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::IndexGet { ty: Type::Int, .. }))
+    );
+}
+
+#[test]
+fn index_writes_lower_to_index_set() {
+    let module = lower("fn main() { let mut a = [1, 2] a[0] = 9 }");
+    let main = &module.functions[0];
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::IndexSet { ty: Type::Int, .. }))
+    );
+}
+
+#[test]
+fn compound_index_assignment_reads_then_writes() {
+    let module = lower("fn main() { let mut a = [1, 2] a[0] += 5 }");
+    let main = &module.functions[0];
+    let insts = &main.body[0].instructions;
+    // one read, one add, one write
+    assert!(
+        insts
+            .iter()
+            .any(|i| matches!(i, Instruction::IndexGet { .. }))
+    );
+    assert!(
+        insts
+            .iter()
+            .any(|i| matches!(i, Instruction::Binary { op: BinOp::Add, .. }))
+    );
+    assert!(
+        insts
+            .iter()
+            .any(|i| matches!(i, Instruction::IndexSet { .. }))
+    );
+}
+
+#[test]
+fn len_lowers_to_arr_len() {
+    let module = lower("fn main() { let a = [1] print(len(a)) }");
+    let main = &module.functions[0];
+    assert!(
+        main.body[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::ArrLen { ty: Type::Int, .. }))
+    );
+}
+
+#[test]
+fn array_elements_survive_the_passes() {
+    let module = lowered("fn main() { let a = [2 * 3, 4] print(a[0]) }");
+    let main = &module.functions[0];
+    // const folding reaches the literal's elements
+    assert!(main.body[0].instructions.iter().any(|i| matches!(
+        i,
+        Instruction::MakeArray {
+            elems,
+            ..
+        } if matches!(&elems[0], Value::ConstInt(6))
+    )));
+}

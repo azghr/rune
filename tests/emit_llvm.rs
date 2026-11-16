@@ -131,6 +131,12 @@ fn generated_llvm_compiles_and_runs() {
             "11\n12",
         ),
         (
+            "arrays",
+            "fn sum(a: [int]) -> int { let mut t = 0 let mut i = 0 while i < len(a) { t += a[i] i += 1 } return t }
+            fn main() { let a = [1, 2, 3] print(sum(a)) a[1] = 40 print(a[1]) let s = [\"x\"] print(s[0]) }",
+            "6\n40\nx",
+        ),
+        (
             "fn_typed_param",
             "fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
             fn inc(n: int) -> int { return n + 1 }
@@ -172,4 +178,24 @@ fn generated_llvm_compiles_and_runs() {
         assert_eq!(stdout.trim_end(), expected, "wrong output for {name}");
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn arrays_call_the_runtime_helpers() {
+    let out = ll("fn main() { let a = [10, 20] print(a[1]) print(len(a)) }");
+    assert!(out.contains("declare ptr @rune_arr_new(i64)"));
+    assert!(out.contains("= call ptr @rune_arr_new(i64 2)"));
+    assert!(out.contains("call void @rune_arr_set(ptr %v"));
+    assert!(out.contains("= call i64 @rune_arr_get(ptr %v"));
+    assert!(out.contains("= call i64 @rune_arr_len(ptr %v"));
+    // array locals are pointers
+    assert!(out.contains("%l_a = alloca ptr"));
+}
+
+#[test]
+fn string_array_elements_round_trip_through_i64() {
+    let out = ll("fn main() { let s = [\"a\"] print(s[0]) }");
+    // stored widened, read narrowed back to a pointer
+    assert!(out.contains("ptrtoint ptr"));
+    assert!(out.contains("inttoptr i64"));
 }

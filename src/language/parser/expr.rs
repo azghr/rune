@@ -116,7 +116,35 @@ impl Parser {
                 span,
             });
         }
-        self.parse_primary()
+        let primary = self.parse_primary()?;
+        self.parse_postfix(primary)
+    }
+
+    /// Postfix operators on any primary expression: calls (`f(x)`) and
+    /// indexing (`a[i]`), chaining freely (`f(x)[0]`, `m[i][j]`).
+    fn parse_postfix(&mut self, mut expr: Expr) -> Result<Expr, Diagnostic> {
+        loop {
+            if self.matches(&[TokenKind::LParen]) {
+                let args = self.parse_call_args()?;
+                let callee_span = expr.span();
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                    span: callee_span.merge(self.previous().span),
+                };
+            } else if self.matches(&[TokenKind::LBracket]) {
+                let index = self.parse_expression()?;
+                self.consume(TokenKind::RBracket, "expected `]` after index")?;
+                let array_span = expr.span();
+                expr = Expr::Index {
+                    array: Box::new(expr),
+                    index: Box::new(index),
+                    span: array_span.merge(self.previous().span),
+                };
+            } else {
+                return Ok(expr);
+            }
+        }
     }
 
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
@@ -147,19 +175,23 @@ impl Parser {
             TokenKind::True => Ok(Expr::Bool { value: true, span }),
             TokenKind::False => Ok(Expr::Bool { value: false, span }),
             TokenKind::String(s) => Ok(Expr::String { value: s, span }),
-            TokenKind::Ident(name) => {
-                let mut expr = Expr::Variable { name, span };
-                // A call result can itself be called: `pick(false)(7)`.
-                while self.matches(&[TokenKind::LParen]) {
-                    let args = self.parse_call_args()?;
-                    let callee_span = expr.span();
-                    expr = Expr::Call {
-                        callee: Box::new(expr),
-                        args,
-                        span: callee_span.merge(self.previous().span),
-                    };
+            TokenKind::Ident(name) => Ok(Expr::Variable { name, span }),
+            TokenKind::LBracket => {
+                // Array literal: [elem, elem, ...].
+                let mut elems = Vec::new();
+                if !self.check(&TokenKind::RBracket) {
+                    loop {
+                        elems.push(self.parse_expression()?);
+                        if !self.matches(&[TokenKind::Comma]) {
+                            break;
+                        }
+                    }
                 }
-                Ok(expr)
+                self.consume(TokenKind::RBracket, "expected `]` after array elements")?;
+                Ok(Expr::ArrayLiteral {
+                    elems,
+                    span: span.merge(self.previous().span),
+                })
             }
             TokenKind::Print => {
                 // `print` is a keyword but reads as a builtin call expression
@@ -213,6 +245,8 @@ impl Expr {
             | Expr::Binary { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Call { span, .. }
+            | Expr::ArrayLiteral { span, .. }
+            | Expr::Index { span, .. }
             | Expr::AnonymousFunction { span, .. }
             | Expr::Grouping { span, .. } => *span,
         }

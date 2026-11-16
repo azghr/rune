@@ -250,6 +250,68 @@ impl Analyzer {
                     _ => unreachable!("parser only produces assignment operators here"),
                 };
             }
+            Stmt::IndexAssign {
+                array,
+                index,
+                op: TokenKind::Eq,
+                value,
+                span,
+            } => {
+                let Some(elem_ty) = self.check_index_target(array, index, *span) else {
+                    let _ = self.analyze_expr(value);
+                    return;
+                };
+                let value_ty = self.analyze_expr(value);
+                if value_ty != elem_ty {
+                    self.error(
+                        format!(
+                            "cannot assign `{}` to array element of type `{}`",
+                            type_name(&value_ty),
+                            type_name(&elem_ty)
+                        ),
+                        *span,
+                    );
+                }
+            }
+            Stmt::IndexAssign {
+                array,
+                index,
+                op: compound_op,
+                value,
+                span,
+            } => {
+                let Some(elem_ty) = self.check_index_target(array, index, *span) else {
+                    let _ = self.analyze_expr(value);
+                    return;
+                };
+                let value_ty = self.analyze_expr(value);
+                // `a[i] <op> v` requires two ints, except `+=` which also
+                // works on string elements (concatenation).
+                let valid = match compound_op {
+                    TokenKind::PlusEq => {
+                        elem_ty == Type::Int && value_ty == Type::Int
+                            || elem_ty == Type::String && value_ty == Type::String
+                    }
+                    _ => elem_ty == Type::Int && value_ty == Type::Int,
+                };
+                if !valid {
+                    self.error(
+                        format!(
+                            "compound assignment requires two `int`s, found `{}` {}= `{}`",
+                            type_name(&elem_ty),
+                            match compound_op {
+                                TokenKind::PlusEq => "+",
+                                TokenKind::MinusEq => "-",
+                                TokenKind::StarEq => "*",
+                                TokenKind::SlashEq => "/",
+                                _ => "%",
+                            },
+                            type_name(&value_ty)
+                        ),
+                        *span,
+                    );
+                }
+            }
             Stmt::Expr(expr) => {
                 self.analyze_expr(expr);
             }
@@ -393,7 +455,12 @@ impl Analyzer {
                     TokenKind::EqEq | TokenKind::BangEq => {
                         // String comparison is compiled to strcmp by the
                         // emitters, so same-type operands are fine here.
-                        if left_ty == right_ty {
+                        // Arrays compare by identity (pointers), which would
+                        // be a footgun — reject them outright.
+                        if matches!(left_ty, Type::Array(_)) || matches!(right_ty, Type::Array(_)) {
+                            self.error("arrays cannot be compared", *span);
+                            Type::Bool
+                        } else if left_ty == right_ty {
                             Type::Bool
                         } else {
                             self.error("operands must have the same type", *span);
@@ -501,6 +568,20 @@ impl Analyzer {
                         }
                         Type::Void
                     }
+                    "len" => {
+                        if args.len() != 1 {
+                            self.error("len takes exactly one argument", *span);
+                        } else {
+                            let arg_ty = self.analyze_expr(&args[0]);
+                            if !matches!(arg_ty, Type::Array(_)) {
+                                self.error(
+                                    format!("len expects an array, found `{}`", type_name(&arg_ty)),
+                                    *span,
+                                );
+                            }
+                        }
+                        Type::Int
+                    }
                     // Calling through a local holding a function value.
                     name if self
                         .scopes
@@ -598,6 +679,36 @@ impl Analyzer {
                 }
             }
             Expr::Grouping { expr, .. } => self.analyze_expr(expr),
+            Expr::ArrayLiteral { elems, span } => {
+                // Element type is inferred from the first element; all
+                // elements must agree. Empty literals cannot be typed.
+                if elems.is_empty() {
+                    self.error(
+                        "empty array literals are not supported: provide at least one element",
+                        *span,
+                    );
+                    return Type::Int; // recovery
+                }
+                let first_ty = self.analyze_expr(&elems[0]);
+                for elem in &elems[1..] {
+                    let ty = self.analyze_expr(elem);
+                    if ty != first_ty {
+                        self.error(
+                            format!(
+                                "array elements must have the same type: expected `{}`, found `{}`",
+                                type_name(&first_ty),
+                                type_name(&ty)
+                            ),
+                            elem.span(),
+                        );
+                    }
+                }
+                Type::Array(Box::new(first_ty))
+            }
+            Expr::Index { array, index, span } => {
+                self.check_index_target(array, index, *span)
+                    .unwrap_or(Type::Int) // recovery
+            }
             Expr::AnonymousFunction {
                 params,
                 return_type,
@@ -630,6 +741,34 @@ impl Analyzer {
                     params: params.iter().map(|p| p.ty.clone()).collect(),
                     return_type: Box::new(ret),
                 }
+            }
+        }
+    }
+
+    /// Type-checks an index read/write target: the array expression must be
+    /// an array and the index an `int`. Returns the element type. Array
+    /// elements are mutable through the reference regardless of the
+    /// binding's `mut` status (only rebinding the variable needs `let mut`).
+    fn check_index_target(&mut self, array: &Expr, index: &Expr, span: Span) -> Option<Type> {
+        let array_ty = self.analyze_expr(array);
+        let index_ty = self.analyze_expr(index);
+        if index_ty != Type::Int {
+            self.error(
+                format!(
+                    "array index must be `int`, found `{}`",
+                    type_name(&index_ty)
+                ),
+                index.span(),
+            );
+        }
+        match array_ty {
+            Type::Array(elem) => Some(*elem),
+            other => {
+                self.error(
+                    format!("cannot index into a value of type `{}`", type_name(&other)),
+                    span,
+                );
+                None
             }
         }
     }

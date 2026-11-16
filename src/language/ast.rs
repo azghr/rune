@@ -49,6 +49,17 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// `array[index] = value` (or a compound form like `+=`). The target is
+    /// an arbitrary index expression, evaluated once.
+    IndexAssign {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        /// `Eq` for plain assignment, or the arithmetic operator for
+        /// compound assignment (`+=` etc.).
+        op: TokenKind,
+        value: Expr,
+        span: Span,
+    },
     Expr(Expr),
     Return {
         value: Option<Expr>,
@@ -115,6 +126,18 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    /// `[e0, e1, ...]` — an array literal. Element type is inferred from the
+    /// elements (which must all agree); empty literals are rejected.
+    ArrayLiteral {
+        elems: Vec<Expr>,
+        span: Span,
+    },
+    /// `array[index]` in expression position (a read).
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
     AnonymousFunction {
         params: Vec<Param>,
         return_type: Option<Type>,
@@ -139,4 +162,7 @@ pub enum Type {
         params: Vec<Type>,
         return_type: Box<Type>,
     },
+    /// An array type, written `[elem]`. A value is a pointer to a heap
+    /// block of `[length, elem...]` slots (see the runtime).
+    Array(Box<Type>),
 }
