@@ -256,6 +256,7 @@ fn wasm_type(ty: &Type) -> &'static str {
         Type::String => "i32", // pointer into linear memory
         Type::Function { .. } => "i32",
         Type::Array(_) => "i32",
+        Type::Error => unreachable!("error type never reaches code generation"),
     }
 }
 

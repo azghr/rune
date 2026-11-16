@@ -73,6 +73,12 @@ cargo run --release -- examples/hello.rune
 
 `output.c` is kept alongside the executable so you can inspect the generated C.
 
+The compiler locates the C runtime (`runtime/rune_rt.c`) by searching upward
+from the working directory and then from the executable. When neither works
+(e.g. for an installed binary), set `RUNE_RUNTIME_DIR` to the directory that
+contains the `runtime` folder. Only the C and LLVM backends need the runtime;
+`rune --wat` and `rune --help` work anywhere.
+
 ## Language Overview
 
 ```rust

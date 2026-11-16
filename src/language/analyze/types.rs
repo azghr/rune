@@ -28,5 +28,14 @@ pub fn type_name(ty: &Type) -> String {
             format!("fn({}) -> {}", params, type_name(return_type))
         }
         Type::Array(elem) => format!("[{}]", type_name(elem)),
+        Type::Error => "error".to_string(),
     }
+}
+
+/// Whether two types should be treated as incompatible for a diagnostic.
+/// The recovery type `Type::Error` is compatible with everything: the real
+/// problem was already reported where it arose, so it must not cascade into
+/// unrelated mismatch errors.
+pub fn types_differ(a: &Type, b: &Type) -> bool {
+    a != b && *a != Type::Error && *b != Type::Error
 }

@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{analyze, analyze_errors};
+use common::{analyze, analyze_errors, compile, parse};
 
 #[test]
 fn accepts_a_valid_program() {
@@ -584,6 +584,83 @@ fn errors_on_compound_assignment_to_a_captured_variable() {
         errs.iter()
             .any(|e| e.message.contains("cannot assign to captured variable")),
         "expected a captured-assignment error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn errors_on_missing_main_when_an_executable_entry_is_required() {
+    use rune::language::analyze::Analyzer;
+    let errs = Analyzer::new()
+        .require_main(true)
+        .analyze(parse("fn helper() { print(1) }"))
+        .expect_err("analysis should fail without `main`");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("program has no `main` function")),
+        "expected a missing-`main` error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn accepts_a_missing_main_when_not_required() {
+    use rune::language::analyze::Analyzer;
+    // Library modules (e.g. the `--wat` pipeline) may omit `main`.
+    Analyzer::new()
+        .analyze(parse("fn helper() { print(1) }"))
+        .expect("analysis should succeed without `main` when not required");
+}
+
+#[test]
+fn compile_requires_a_main_function() {
+    let result = compile("fn helper() { print(1) }");
+    assert!(
+        result.is_err() && result.unwrap_err().contains("compilation failed"),
+        "compiling an executable without `main` should fail"
+    );
+}
+
+#[test]
+fn errors_when_a_non_void_function_can_fall_off_the_end() {
+    let errs = analyze_errors(
+        "fn f(n: int) -> int {
+            if n > 0 { return 1 }
+        }
+        fn main() { print(f(1)) }",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("not all paths return a value")),
+        "expected a missing-return error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn accepts_a_function_that_returns_on_every_path() {
+    analyze(
+        "fn f(n: int) -> int {
+            if n > 0 { return 1 } else { return 2 }
+        }
+        fn main() { print(f(1)) }",
+    );
+}
+
+#[test]
+fn empty_array_literal_reports_one_error_without_a_false_mismatch() {
+    let errs = analyze_errors("fn main() { let a: [int] = [] }");
+    assert_eq!(
+        errs.iter()
+            .filter(|e| e.message.contains("empty array"))
+            .count(),
+        1,
+        "expected exactly the empty-array error, got: {:?}",
+        errs
+    );
+    assert!(
+        !errs.iter().any(|e| e.message.contains("type mismatch")),
+        "empty-array recovery must not cascade, got: {:?}",
         errs
     );
 }

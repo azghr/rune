@@ -77,6 +77,7 @@ pub fn c_decl(ty: &Type, name: &str) -> String {
         Type::Function { .. } => format!("void* {}", name),
         // Arrays are pointers to [length, elems...] blocks (see rune_rt.h).
         Type::Array(_) => format!("void* {}", name),
+        Type::Error => unreachable!("error type never reaches code generation"),
     }
 }
 
@@ -96,5 +97,6 @@ pub fn c_value_type(ty: &Type) -> Option<&'static str> {
         Type::Void => Some("void"),
         Type::Function { .. } => Some("void*"),
         Type::Array(_) => Some("void*"),
+        Type::Error => unreachable!("error type never reaches code generation"),
     }
 }

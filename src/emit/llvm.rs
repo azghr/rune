@@ -93,6 +93,7 @@ fn llvm_type(ty: &Type) -> &'static str {
         Type::Bool => "i1",
         Type::Void => "void",
         Type::String | Type::Function { .. } | Type::Array(_) => "ptr",
+        Type::Error => unreachable!("error type never reaches code generation"),
     }
 }
 

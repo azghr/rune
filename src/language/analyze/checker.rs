@@ -4,6 +4,7 @@
 
 use crate::diagnostics::diagnostic::Diagnostic;
 use crate::language::analyze::scope::{ScopeStack, Symbol};
+use crate::language::analyze::types::types_differ;
 use crate::language::ast::*;
 use crate::language::token::TokenKind;
 use crate::shared::span::Span;
@@ -26,6 +27,9 @@ pub struct Analyzer {
     /// rejecting assignment to captured variables.
     lambda_depths: Vec<usize>,
     functions: HashMap<String, FunctionSignature>,
+    /// Whether the program needs a `main` entry point (true for backends
+    /// producing a runnable binary; WASM modules may be libraries).
+    require_main: bool,
     errors: Vec<Diagnostic>,
 }
 
@@ -43,8 +47,15 @@ impl Analyzer {
             loop_depth: 0,
             lambda_depths: Vec::new(),
             functions: HashMap::new(),
+            require_main: false,
             errors: Vec::new(),
         }
+    }
+
+    /// Sets whether a missing `main` is an error (executable backends).
+    pub fn require_main(mut self, require: bool) -> Self {
+        self.require_main = require;
+        self
     }
 
     pub fn analyze(mut self, program: Program) -> Result<Program, Vec<Diagnostic>> {
@@ -70,6 +81,20 @@ impl Analyzer {
                     func.span,
                 );
             }
+        }
+
+        // The entry point must exist for executable backends; catching it
+        // here gives a diagnostic instead of a bare linker error later.
+        if self.require_main && !self.functions.contains_key("main") {
+            let span = program
+                .functions
+                .first()
+                .map(|f| f.span)
+                .unwrap_or_default();
+            self.error(
+                "program has no `main` function: add `fn main() { ... }`".to_string(),
+                span,
+            );
         }
 
         for func in &program.functions {
@@ -99,6 +124,21 @@ impl Analyzer {
         }
 
         self.analyze_block(&func.body);
+        // A declared return type means every path must produce a value;
+        // falling off the end would silently return whatever the caller
+        // happens to read.
+        if let Some(ret) = &self.current_return_type
+            && *ret != Type::Void
+            && !always_returns(&func.body.statements)
+        {
+            self.error(
+                format!(
+                    "not all paths return a value: `{}` must be returned on every path",
+                    type_name(ret)
+                ),
+                func.span,
+            );
+        }
         self.scopes.pop();
         self.current_return_type = None;
     }
@@ -125,7 +165,7 @@ impl Analyzer {
                     self.error("cannot bind a `void` value to a variable", *span);
                 }
                 let final_ty = if let Some(declared) = ty {
-                    if *declared != value_ty {
+                    if types_differ(declared, &value_ty) {
                         self.error(
                             format!(
                                 "type mismatch: expected `{}`, found `{}`",
@@ -160,7 +200,7 @@ impl Analyzer {
                 };
 
                 let value_ty = self.analyze_expr(value);
-                if sym.ty != value_ty {
+                if types_differ(&sym.ty, &value_ty) {
                     self.error(
                         format!(
                             "cannot assign `{}` to variable of type `{}`",
@@ -185,7 +225,7 @@ impl Analyzer {
                 // The result of `x <op> value` must be assignable back to x.
                 let _ = match compound_op {
                     TokenKind::PlusEq if sym.ty == Type::String => {
-                        if value_ty != Type::String {
+                        if value_ty != Type::String && value_ty != Type::Error {
                             self.error(
                                 format!(
                                     "cannot concatenate `{}` onto a `string`",
@@ -201,7 +241,10 @@ impl Analyzer {
                     | TokenKind::StarEq
                     | TokenKind::SlashEq
                     | TokenKind::PercentEq => {
-                        if sym.ty != Type::Int || value_ty != Type::Int {
+                        if (sym.ty != Type::Int || value_ty != Type::Int)
+                            && sym.ty != Type::Error
+                            && value_ty != Type::Error
+                        {
                             self.error(
                                 format!(
                                     "compound assignment requires two `int`s, found `{}` {}= `{}`",
@@ -235,7 +278,7 @@ impl Analyzer {
                     return;
                 };
                 let value_ty = self.analyze_expr(value);
-                if value_ty != elem_ty {
+                if types_differ(&elem_ty, &value_ty) {
                     self.error(
                         format!(
                             "cannot assign `{}` to array element of type `{}`",
@@ -260,13 +303,15 @@ impl Analyzer {
                 let value_ty = self.analyze_expr(value);
                 // `a[i] <op> v` requires two ints, except `+=` which also
                 // works on string elements (concatenation).
-                let valid = match compound_op {
-                    TokenKind::PlusEq => {
-                        elem_ty == Type::Int && value_ty == Type::Int
-                            || elem_ty == Type::String && value_ty == Type::String
-                    }
-                    _ => elem_ty == Type::Int && value_ty == Type::Int,
-                };
+                let valid = elem_ty != Type::Error
+                    && value_ty != Type::Error
+                    && match compound_op {
+                        TokenKind::PlusEq => {
+                            elem_ty == Type::Int && value_ty == Type::Int
+                                || elem_ty == Type::String && value_ty == Type::String
+                        }
+                        _ => elem_ty == Type::Int && value_ty == Type::Int,
+                    };
                 if !valid {
                     self.error(
                         format!(
@@ -294,7 +339,7 @@ impl Analyzer {
                     .map(|e| self.analyze_expr(e))
                     .unwrap_or(Type::Void);
                 if let Some(expected) = &self.current_return_type
-                    && *expected != ret_ty
+                    && types_differ(expected, &ret_ty)
                 {
                     self.error(
                         format!(
@@ -313,7 +358,7 @@ impl Analyzer {
                 ..
             } => {
                 let cond_ty = self.analyze_expr(condition);
-                if !cond_ty.is_bool() {
+                if !cond_ty.is_bool() && cond_ty != Type::Error {
                     self.error("condition must be `bool`", condition.span());
                 }
                 self.analyze_block(then_branch);
@@ -325,7 +370,7 @@ impl Analyzer {
                 condition, body, ..
             } => {
                 let cond_ty = self.analyze_expr(condition);
-                if !cond_ty.is_bool() {
+                if !cond_ty.is_bool() && cond_ty != Type::Error {
                     self.error("condition must be `bool`", condition.span());
                 }
                 self.loop_depth += 1;
@@ -347,7 +392,7 @@ impl Analyzer {
                 }
                 if let Some(cond) = condition {
                     let cond_ty = self.analyze_expr(cond);
-                    if !cond_ty.is_bool() {
+                    if !cond_ty.is_bool() && cond_ty != Type::Error {
                         self.error("condition must be `bool`", cond.span());
                     }
                 }
@@ -400,6 +445,10 @@ impl Analyzer {
             } => {
                 let left_ty = self.analyze_expr(left);
                 let right_ty = self.analyze_expr(right);
+                if left_ty == Type::Error || right_ty == Type::Error {
+                    // The failing operand already reported its problem.
+                    return Type::Error;
+                }
 
                 match op {
                     TokenKind::Plus
@@ -467,6 +516,9 @@ impl Analyzer {
             }
             Expr::Unary { op, expr, span } => {
                 let ty = self.analyze_expr(expr);
+                if ty == Type::Error {
+                    return Type::Error;
+                }
                 match op {
                     TokenKind::Minus if ty.is_numeric() => Type::Int,
                     TokenKind::Bang if ty.is_bool() => Type::Bool,
@@ -487,6 +539,7 @@ impl Analyzer {
                             params,
                             return_type,
                         } => (params, *return_type),
+                        Type::Error => return Type::Error,
                         other => {
                             self.error(
                                 format!("cannot call a value of type `{}`", type_name(&other)),
@@ -507,7 +560,7 @@ impl Analyzer {
                     }
                     for (arg, param_ty) in args.iter().zip(&params) {
                         let arg_ty = self.analyze_expr(arg);
-                        if arg_ty != *param_ty {
+                        if types_differ(param_ty, &arg_ty) {
                             self.error(
                                 format!(
                                     "argument type mismatch: expected `{}`, found `{}`",
@@ -529,7 +582,9 @@ impl Analyzer {
                             self.error("print takes exactly one argument", *span);
                         } else {
                             let arg_ty = self.analyze_expr(&args[0]);
-                            if !matches!(arg_ty, Type::Int | Type::Bool | Type::String) {
+                            if arg_ty != Type::Error
+                                && !matches!(arg_ty, Type::Int | Type::Bool | Type::String)
+                            {
                                 self.error(
                                     format!(
                                         "cannot print a value of type `{}`",
@@ -546,7 +601,7 @@ impl Analyzer {
                             self.error("len takes exactly one argument", *span);
                         } else {
                             let arg_ty = self.analyze_expr(&args[0]);
-                            if !matches!(arg_ty, Type::Array(_)) {
+                            if arg_ty != Type::Error && !matches!(arg_ty, Type::Array(_)) {
                                 self.error(
                                     format!("len expects an array, found `{}`", type_name(&arg_ty)),
                                     *span,
@@ -582,7 +637,7 @@ impl Analyzer {
                         }
                         for (arg, param_ty) in args.iter().zip(&params) {
                             let arg_ty = self.analyze_expr(arg);
-                            if arg_ty != *param_ty {
+                            if types_differ(param_ty, &arg_ty) {
                                 self.error(
                                     format!(
                                         "argument type mismatch: expected `{}`, found `{}`",
@@ -625,7 +680,7 @@ impl Analyzer {
                             }
                             for (arg, param_ty) in args.iter().zip(&signature.params) {
                                 let arg_ty = self.analyze_expr(arg);
-                                if arg_ty != *param_ty {
+                                if types_differ(param_ty, &arg_ty) {
                                     self.error(
                                         format!(
                                             "argument type mismatch: expected `{}`, found `{}`",
@@ -660,12 +715,12 @@ impl Analyzer {
                         "empty array literals are not supported: provide at least one element",
                         *span,
                     );
-                    return Type::Int; // recovery
+                    return Type::Error; // recovery
                 }
                 let first_ty = self.analyze_expr(&elems[0]);
                 for elem in &elems[1..] {
                     let ty = self.analyze_expr(elem);
-                    if ty != first_ty {
+                    if types_differ(&first_ty, &ty) {
                         self.error(
                             format!(
                                 "array elements must have the same type: expected `{}`, found `{}`",
@@ -686,7 +741,7 @@ impl Analyzer {
                 params,
                 return_type,
                 body,
-                span: _,
+                span,
             } => {
                 // The body is checked with the enclosing scopes visible so
                 // captures (by value, at closure creation) type-check
@@ -714,6 +769,16 @@ impl Analyzer {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 self.analyze_block(body);
+                // Same all-paths-return rule as named functions.
+                if ret != Type::Void && !always_returns(&body.statements) {
+                    self.error(
+                        format!(
+                            "not all paths return a value: `{}` must be returned on every path",
+                            type_name(&ret)
+                        ),
+                        *span,
+                    );
+                }
                 self.loop_depth = saved_loop_depth;
                 self.current_return_type = saved_return;
                 self.scopes.pop();
@@ -767,7 +832,10 @@ impl Analyzer {
     fn check_index_target(&mut self, array: &Expr, index: &Expr, span: Span) -> Option<Type> {
         let array_ty = self.analyze_expr(array);
         let index_ty = self.analyze_expr(index);
-        if index_ty != Type::Int {
+        if array_ty == Type::Error {
+            return Some(Type::Error);
+        }
+        if index_ty != Type::Int && index_ty != Type::Error {
             self.error(
                 format!(
                     "array index must be `int`, found `{}`",
@@ -795,4 +863,27 @@ impl Analyzer {
 
 fn type_name(ty: &Type) -> String {
     crate::language::analyze::types::type_name(ty)
+}
+
+/// Whether every execution path through the statements ends in `return`.
+/// Conservative: loops are never assumed to exit via `return` (a
+/// zero-iteration loop would fall through), and `if` counts only when it
+/// has an `else` whose branches both return. Once any statement returns,
+/// everything after it is unreachable, so a sequence returns if any of its
+/// statements does.
+fn always_returns(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(|s| match s {
+        Stmt::Return { .. } => true,
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            else_branch.is_some()
+                && always_returns(&then_branch.statements)
+                && always_returns(&else_branch.as_ref().unwrap().statements)
+        }
+        Stmt::Block(block) => always_returns(&block.statements),
+        _ => false,
+    })
 }

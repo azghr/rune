@@ -137,10 +137,12 @@ All binary operators are left-associative. Rules to know:
 
 - `&&` and `||` short-circuit: the right operand is only evaluated when the
   left operand allows it.
+- `<`, `<=`, `>`, `>=` require two `int` operands. `==`/`!=` accept any two
+  operands of the same type; string comparison compares **contents**.
 - Division (or remainder) by zero aborts the program with a diagnostic;
   integer arithmetic wraps on overflow.
-- Comparisons and equality require two operands of the same type; string
-  comparison compares **contents**.
+- Equality and comparisons require two operands of the same type; string
+  equality compares **contents**.
 - `+` concatenates two strings; mixing strings and numbers is an error.
 - Compound assignment `+=` `-=` `*=` `/=` `%=` assigns to a mutable
   variable; `s += t` concatenates strings.
@@ -190,6 +192,11 @@ fn fib(n: int) -> int {
   type must match the declared return type.
 - A function without a return type returns `void`; `void` values cannot be
   assigned to variables or printed.
+- A function with a return type must return on **every** path: a body that
+  can fall off the end is a compile-time error. The check is conservative —
+  an `if` counts only when it has an `else` whose branches both return, and
+  loops are never assumed to exit via `return`, so put a `return` after the
+  loop (it is unreachable if the loop never exits).
 
 ## Builtin functions
 

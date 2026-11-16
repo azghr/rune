@@ -165,4 +165,10 @@ pub enum Type {
     /// An array type, written `[elem]`. A value is a pointer to a heap
     /// block of `[length, elem...]` slots (see the runtime).
     Array(Box<Type>),
+    /// Recovery type for expressions whose type could not be determined
+    /// (an error has already been reported for them). Never produced by
+    /// well-typed programs, so it never reaches lowering or code
+    /// generation; the checker treats it as compatible with every type to
+    /// avoid cascading diagnostics.
+    Error,
 }

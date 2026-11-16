@@ -4,6 +4,30 @@ All notable changes to Rune are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-16
+
+### Fixed
+
+- The CLI locates the C runtime (`runtime/rune_rt.c`) by searching upward
+  from the working directory and then from the executable, so `rune` works
+  from any directory; `RUNE_RUNTIME_DIR` overrides the search and a bad
+  value is reported instead of silently ignored
+- `--help` and `--wat` no longer require the C runtime to be locatable
+- A program without a `main` function is rejected with a diagnostic on the
+  C and LLVM paths instead of failing in the linker (`--wat` still accepts
+  library modules without `main`)
+- A function with a return type that can fall off the end of its body is a
+  compile error (`not all paths return a value`) instead of silently
+  returning zero
+- Empty array literals no longer produce a misleading secondary
+  `type mismatch` error naming the wrong type
+
+### Changed
+
+- The check that every path in a non-`void` function returns is
+  conservative: loops are never assumed to exit via `return`, so a `return`
+  inside `for ;;` does not satisfy it — add a `return` after the loop
+
 ## [0.2.1] - 2026-11-16
 
 ### Fixed
