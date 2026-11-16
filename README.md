@@ -35,8 +35,9 @@ and linked against a small C runtime.
 - Compiles through a typed three-address IR with constant folding (including
   branch elimination), unreachable-block removal, and liveness-based dead
   code elimination
-- Two backends: C (via `gcc`) and WebAssembly text format (`rune --wat`,
-  runnable in any WASM host, with strings in linear memory)
+- Three backends: C (via `gcc`), WebAssembly text format (`rune --wat`,
+  runnable in any WASM host, with strings in linear memory), and LLVM
+  textual IR (`rune --llvm`, compiled with `clang`)
 - Short-circuit `&&`/`||` lowered to real control flow, not eager evaluation
 - Written in Rust with zero external dependencies
 
@@ -122,11 +123,6 @@ More examples live in [`examples/`](examples).
 - [Language reference](docs/language.md) — the Rune language: syntax, types,
   operators, and control flow
 - [Architecture](docs/architecture.md) — how the compiler pipeline fits together
-
-## Roadmap
-
-- [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
-- [ ] LLVM backend
 
 ## Contributing
 

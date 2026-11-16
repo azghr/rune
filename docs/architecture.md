@@ -236,6 +236,29 @@ representation.
 - Validate output with `wat2wasm` (wabt); the test suite runs `wat2wasm`
   when it is installed and skips the check otherwise.
 
+## Alternative backend: LLVM (`src/emit/llvm.rs`)
+
+`rune --llvm file.rune` emits **textual LLVM IR** (`.ll`) from the same IR
+module, then invokes `clang` (which compiles textual IR natively) to link it
+against the C runtime. Like the WASM backend, it emits text — no LLVM
+libraries, keeping the zero-dependency rule intact.
+
+- `int` maps to `i64`; `bool` maps to `i1` (widened to `i8` only at the
+  `rune_print_bool` boundary); `string` and function values map to `ptr`.
+- LLVM has real basic blocks, so the IR's CFG maps over **directly**: each
+  block becomes a labeled block and the terminators become `br`/`ret` — no
+  dispatch loop needed, unlike WASM.
+- Every variable and temp gets an `alloca` slot in the entry block, loaded
+  and stored on use — the straightforward `-O0` style, avoiding phi nodes.
+- Function values follow the C backend's convention exactly: closure blocks
+  allocated by `rune_closure_new`/`rune_closure_set`, env-first wrapper
+  functions, and indirect calls through the loaded code pointer. LLVM has
+  real function pointers, so no function table is needed.
+- String literals become private NUL-terminated globals; `rune_strcat`
+  comes from the C runtime and `strcmp` from libc.
+- The test suite compiles and executes the generated `.ll` with `clang`
+  when it is installed and skips the check otherwise.
+
 ## Runtime (`runtime/`)
 
 `rune_rt.c` / `rune_rt.h` are a handful of small C functions linked into every

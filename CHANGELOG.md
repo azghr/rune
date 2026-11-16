@@ -54,17 +54,23 @@ First tagged release.
 
 - `rune` CLI: compiles `.rune` files to C, invokes `gcc`, produces a binary
 - `irdebug` binary: dumps the IR before and after each pass
-- Test suite (169 tests) across lexer, parser, checker, IR passes, codegen,
+- Test suite (178 tests) across lexer, parser, checker, IR passes, codegen,
   and end-to-end binaries that compile with `gcc` and check output
 - `rune --wat`: a WebAssembly text-format backend emitting from the same
   IR, with host imports for `print` and strings living in linear memory
   (data segments plus a bump-allocating runtime prelude). Function values
-  work on both backends: a value is a closure block (`[code word, captures]`)
+  work on all backends: a value is a closure block (`[code word, captures]`)
   reached through `call_indirect` over a funcref table of env-first wrappers
   — baseline WASM 1.0, no reference-types proposal needed
+- `rune --llvm`: an LLVM backend emitting textual LLVM IR from the same IR
+  module, compiled with `clang` against the C runtime — no LLVM libraries,
+  keeping the zero-dependency rule. The IR's CFG maps directly to LLVM
+  basic blocks; locals are `alloca` slots; function values use the same
+  closure convention via real function pointers
 - CI on every push and PR: formatting, clippy, build, tests, and a pipeline
   smoke test; the test suite validates the generated WAT with `wat2wasm`
-  (wabt) when it is installed and skips that check otherwise
+  (wabt) and compiles/executes the generated LLVM IR with `clang` when
+  those tools are installed, skipping the checks otherwise
 
 ### Fixed
 
