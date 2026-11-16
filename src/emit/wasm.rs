@@ -24,8 +24,12 @@
 //! small runtime prelude provides concatenation (`rune_strcat`), contents
 //! comparison (`rune_strcmp`), and a bump allocator with memory growth.
 //! Concatenated strings are never freed, mirroring the C backend.
-//! Function values are rejected with a clear error: they need the
-//! reference-types proposal. `print` is provided by host imports.
+//! Function values are closure pointers into linear memory, mirroring the
+//! C backend's `rune_closure_new`/`rune_closure_set` layout: word 0 holds
+//! the table index of an env-first wrapper (reached with `call_indirect`
+//! over a funcref table — all baseline WASM 1.0, no reference types
+//! needed), followed by one i64 slot per captured variable. `print` is
+//! provided by host imports.
 //!
 //! Validate the output with `wat2wasm` (from the wabt toolchain).
 
@@ -102,13 +106,17 @@ const RUNE_RUNTIME: &str = r#"
     (i32.sub (local.get $ca) (local.get $cb)))
 "#;
 
-/// Emits a complete WAT module, or an error describing the first unsupported
-/// construct.
-pub fn generate(module: &Module) -> Result<String, String> {
-    for func in &module.functions {
-        check_function(func)?;
-    }
+/// Module-level emission context: string literals, the closure table
+/// layout (target name → table index), and the `call_indirect` signature
+/// ids (key → `$tN`).
+struct EmitCtx<'a> {
+    literals: &'a [(u32, String)],
+    targets: &'a [(String, u32)],
+    signatures: &'a [(String, u32)],
+}
 
+/// Emits a complete WAT module.
+pub fn generate(module: &Module) -> Result<String, String> {
     let mut out = String::new();
     out.push_str("(module\n");
 
@@ -118,9 +126,31 @@ pub fn generate(module: &Module) -> Result<String, String> {
     out.push_str("  (import \"rune\" \"print_bool\" (func $f_rune_print_bool (param i32)))\n");
     out.push_str("  (import \"rune\" \"print_string\" (func $f_rune_print_string (param i32)))\n");
 
+    // Signature types for the call_indirect sites, deduped in first-use
+    // order.
+    let signatures = indirect_signatures(module);
+    for (key, id) in &signatures {
+        let _ = writeln!(out, "  (type $t{id} {key})");
+    }
+    if !signatures.is_empty() {
+        out.push('\n');
+    }
+
     // Linear memory: exported so hosts can read string values. Literals
     // live in data segments; the runtime prelude bump-allocates past them.
     out.push_str("  (memory (export \"rune_mem\") 1)\n");
+
+    // Closure targets are reached through a funcref table; the position in
+    // the target list is the index a closure block stores as its code word.
+    let targets = closure_targets(module);
+    let table: Vec<(String, u32)> = targets
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| (name.clone(), i as u32))
+        .collect();
+    if !targets.is_empty() {
+        let _ = writeln!(out, "  (table {} funcref)", targets.len());
+    }
 
     let literals = collect_string_literals(module);
     let heap_base = string_heap_base(&literals);
@@ -141,9 +171,32 @@ pub fn generate(module: &Module) -> Result<String, String> {
     // Runtime prelude: allocation, strlen, strcat, strcmp (fixed WAT text).
     out.push_str(RUNE_RUNTIME);
 
+    let ctx = EmitCtx {
+        literals: &literals,
+        targets: &table,
+        signatures: &signatures,
+    };
+
     for func in &module.functions {
         out.push('\n');
-        emit_function(&mut out, func, &literals);
+        emit_function(&mut out, func, &ctx);
+    }
+
+    if !targets.is_empty() {
+        let names = targets
+            .iter()
+            .map(|(name, _)| format!("$f_rune_closure_{name}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = writeln!(out, "\n  (elem (i32.const 0) func {names})");
+        for (name, n_caps) in &targets {
+            let target = module
+                .functions
+                .iter()
+                .find(|f| &f.name == name)
+                .expect("closure target must be a declared function");
+            emit_closure_wrapper(&mut out, target, *n_caps);
+        }
     }
 
     // main is the entry point; export it when present.
@@ -155,61 +208,15 @@ pub fn generate(module: &Module) -> Result<String, String> {
     Ok(out)
 }
 
-/// Rejects constructs the backend does not support yet, with the function
-/// name in the message.
-fn check_function(func: &Function) -> Result<(), String> {
-    let unsupported = |what: &str| -> String {
-        format!(
-            "the WASM backend does not support {} yet (in function `{}`)",
-            what, func.name
-        )
-    };
-
-    for (_, ty) in &func.params {
-        check_type(ty).map_err(|_| unsupported("function values in parameters"))?;
-    }
-    check_type(&func.return_type).map_err(|_| unsupported("function values in return types"))?;
-
-    for block in &func.body {
-        for inst in &block.instructions {
-            if let Instruction::CallIndirect { .. } = inst {
-                return Err(unsupported("calls through function values"));
-            }
-            if let Instruction::MakeClosure { .. } = inst {
-                return Err(unsupported("closures"));
-            }
-            let tys = match inst {
-                Instruction::Binary { ty, .. }
-                | Instruction::Unary { ty, .. }
-                | Instruction::Move { ty, .. }
-                | Instruction::Call { ty, .. }
-                | Instruction::MakeClosure { ty, .. } => vec![ty.clone()],
-                Instruction::CallIndirect { .. } => unreachable!("checked above"),
-            };
-            for ty in tys {
-                check_type(&ty)
-                    .map_err(|_| unsupported("strings or function values in instructions"))?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn check_type(ty: &Type) -> Result<(), ()> {
-    match ty {
-        Type::Int | Type::Bool | Type::Void | Type::String => Ok(()),
-        Type::Function { .. } => Err(()),
-    }
-}
-
-/// The WASM value type for a supported Rune type.
+/// The WASM value type for a Rune type. Function values are closure
+/// pointers into linear memory.
 fn wasm_type(ty: &Type) -> &'static str {
     match ty {
         Type::Int => "i64",
         Type::Bool => "i32",
         Type::Void => "",
         Type::String => "i32", // pointer into linear memory
-        Type::Function { .. } => unreachable!("rejected by check_function"),
+        Type::Function { .. } => "i32",
     }
 }
 
@@ -218,7 +225,7 @@ fn local_ref(name: &str) -> String {
     format!("$l_{name}")
 }
 
-fn emit_function(out: &mut String, func: &Function, literals: &[(u32, String)]) {
+fn emit_function(out: &mut String, func: &Function, ctx: &EmitCtx) {
     let _ = write!(out, "  (func $f_{}", func.name);
     for (name, ty) in &func.params {
         let _ = write!(out, " (param {} {})", local_ref(name), wasm_type(ty));
@@ -238,7 +245,7 @@ fn emit_function(out: &mut String, func: &Function, literals: &[(u32, String)]) 
     // The dispatch register for the control-flow loop.
     out.push_str(" (local $rune_pc i32)\n");
 
-    emit_body(out, func, &locals, literals);
+    emit_body(out, func, &locals, ctx);
     out.push_str("  )\n");
 }
 
@@ -259,8 +266,12 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                 | Instruction::Call {
                     dest: Some(dest), ..
                 }
+                | Instruction::CallIndirect {
+                    dest: Some(dest), ..
+                }
                 | Instruction::MakeClosure { dest, .. } => dest,
-                Instruction::Call { dest: None, .. } | Instruction::CallIndirect { .. } => continue,
+                Instruction::Call { dest: None, .. }
+                | Instruction::CallIndirect { dest: None, .. } => continue,
             };
             if !types.iter().any(|(n, _)| n == dest) {
                 let ty = match inst {
@@ -270,8 +281,12 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
                     | Instruction::Call {
                         dest: Some(_), ty, ..
                     }
+                    | Instruction::CallIndirect {
+                        dest: Some(_), ty, ..
+                    }
                     | Instruction::MakeClosure { ty, .. } => ty.clone(),
-                    Instruction::Call { dest: None, .. } | Instruction::CallIndirect { .. } => {
+                    Instruction::Call { dest: None, .. }
+                    | Instruction::CallIndirect { dest: None, .. } => {
                         continue;
                     }
                 };
@@ -282,12 +297,7 @@ fn local_types(func: &Function) -> Vec<(String, Type)> {
     types
 }
 
-fn emit_body(
-    out: &mut String,
-    func: &Function,
-    locals: &[(String, Type)],
-    literals: &[(u32, String)],
-) {
+fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)], ctx: &EmitCtx) {
     let blocks = &func.body;
     let n = blocks.len();
     let ind = "    "; // depth 1: inside the func
@@ -314,7 +324,7 @@ fn emit_body(
 
     for block in blocks {
         let _ = writeln!(out, "{ind}    )");
-        emit_block_case(out, block, &format!("{ind}    "), locals, literals);
+        emit_block_case(out, block, &format!("{ind}    "), locals, ctx);
     }
 
     let _ = writeln!(out, "{ind}  )");
@@ -333,15 +343,15 @@ fn emit_block_case(
     block: &BasicBlock,
     ind: &str,
     locals: &[(String, Type)],
-    literals: &[(u32, String)],
+    ctx: &EmitCtx,
 ) {
     let case = ind.to_string(); // cases sit one level deeper than their label
     for inst in &block.instructions {
-        emit_instruction(out, inst, &case, locals, literals);
+        emit_instruction(out, inst, &case, locals, ctx);
     }
     match &block.terminator {
         Terminator::Return(Some(value)) => {
-            emit_value(out, value, ind, locals, literals);
+            emit_value(out, value, ind, locals, ctx);
             let _ = writeln!(out, "{ind}return");
         }
         Terminator::Return(None) => {
@@ -357,7 +367,7 @@ fn emit_block_case(
             then_block,
             else_block,
         } => {
-            emit_value(out, condition, ind, locals, literals);
+            emit_value(out, condition, ind, locals, ctx);
             let _ = writeln!(out, "{ind}(if");
             let _ = writeln!(out, "{ind}  (then");
             let _ = writeln!(out, "{ind}    (i32.const {then_block})");
@@ -378,7 +388,7 @@ fn emit_instruction(
     inst: &Instruction,
     ind: &str,
     locals: &[(String, Type)],
-    literals: &[(u32, String)],
+    ctx: &EmitCtx,
 ) {
     match inst {
         Instruction::Binary {
@@ -388,8 +398,8 @@ fn emit_instruction(
             right,
             ty,
         } => {
-            emit_value(out, left, ind, locals, literals);
-            emit_value(out, right, ind, locals, literals);
+            emit_value(out, left, ind, locals, ctx);
+            emit_value(out, right, ind, locals, ctx);
             let string_operands = value_type(left, locals) == Type::String
                 || value_type(right, locals) == Type::String;
             if matches!(op, BinOp::Eq | BinOp::NotEq | BinOp::Add) && string_operands {
@@ -416,18 +426,18 @@ fn emit_instruction(
                 UnaryOp::Neg => {
                     // 0 - value
                     let _ = writeln!(out, "{ind}i64.const 0");
-                    emit_value(out, value, ind, locals, literals);
+                    emit_value(out, value, ind, locals, ctx);
                     let _ = writeln!(out, "{ind}i64.sub");
                 }
                 UnaryOp::Not => {
-                    emit_value(out, value, ind, locals, literals);
+                    emit_value(out, value, ind, locals, ctx);
                     let _ = writeln!(out, "{ind}i32.eqz");
                 }
             }
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
         Instruction::Move { dest, value, .. } => {
-            emit_value(out, value, ind, locals, literals);
+            emit_value(out, value, ind, locals, ctx);
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
         Instruction::Call {
@@ -437,7 +447,7 @@ fn emit_instruction(
             ty,
         } => {
             for arg in args {
-                emit_value(out, arg, ind, locals, literals);
+                emit_value(out, arg, ind, locals, ctx);
             }
             let callee = if name == "print" {
                 // Dispatch on the argument's static type.
@@ -450,16 +460,109 @@ fn emit_instruction(
                 &format!("$f_{name}")
             };
             let _ = writeln!(out, "{ind}call {callee}");
-            if let Some(dest) = dest {
-                let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
-            } else {
-                let _ = ty;
+            emit_call_result(out, dest, ty, ind);
+        }
+        Instruction::CallIndirect {
+            dest,
+            callee,
+            args,
+            ty,
+        } => {
+            // Function values are closure pointers: pass the closure as the
+            // env argument, then load its code word (the wrapper's table
+            // index) for the call_indirect. The index must sit on top of
+            // the operand stack, so it is loaded after all the arguments.
+            let callee_ref = match callee {
+                Value::Local(name) => local_ref(name),
+                other => unreachable!("non-local callee {other:?} in CallIndirect"),
+            };
+            let signature = match value_type(callee, locals) {
+                Type::Function {
+                    params,
+                    return_type,
+                } => signature_key(&params, &return_type),
+                other => unreachable!("indirect callee has non-function type {other:?}"),
+            };
+            let id = ctx
+                .signatures
+                .iter()
+                .find(|(key, _)| *key == signature)
+                .map(|(_, id)| *id)
+                .expect("call_indirect signature missing from the type section");
+            let _ = writeln!(out, "{ind}local.get {callee_ref}");
+            for arg in args {
+                emit_value(out, arg, ind, locals, ctx);
+            }
+            let _ = writeln!(out, "{ind}local.get {callee_ref}");
+            let _ = writeln!(out, "{ind}i32.load");
+            let _ = writeln!(out, "{ind}call_indirect (type $t{id})");
+            emit_call_result(out, dest, ty, ind);
+        }
+        Instruction::MakeClosure {
+            dest,
+            func,
+            captures,
+            ..
+        } => {
+            // Allocate a closure block: [table index, capture values...],
+            // mirroring the C backend's rune_closure_new/rune_closure_set.
+            let index = ctx
+                .targets
+                .iter()
+                .find(|(name, _)| name == func)
+                .map(|(_, index)| *index)
+                .expect("closure target missing from the function table");
+            let _ = writeln!(out, "{ind}i32.const {}", closure_block_size(captures.len()));
+            let _ = writeln!(out, "{ind}call $f_rune_alloc");
+            let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
+            let _ = writeln!(out, "{ind}local.get {}", local_ref(dest));
+            let _ = writeln!(out, "{ind}i32.const {index}");
+            let _ = writeln!(out, "{ind}i32.store");
+            for (i, cap) in captures.iter().enumerate() {
+                // Captures are stored as i64 slots regardless of width;
+                // narrow values are widened, and the wrapper narrows them
+                // back when forwarding.
+                let cap_ty = value_type(cap, locals);
+                let _ = writeln!(out, "{ind}local.get {}", local_ref(dest));
+                emit_value(out, cap, ind, locals, ctx);
+                if cap_ty != Type::Int {
+                    let _ = writeln!(out, "{ind}i64.extend_i32_u");
+                }
+                let _ = writeln!(out, "{ind}i64.store offset={}", closure_capture_offset(i));
             }
         }
-        Instruction::CallIndirect { .. } | Instruction::MakeClosure { .. } => {
-            unreachable!("rejected by check_function")
-        }
     }
+}
+
+/// Consumes a call's result: stores it into the destination local, or drops
+/// it when the call was made as a statement (a non-void result left on the
+/// operand stack is invalid WAT).
+fn emit_call_result(out: &mut String, dest: &Option<String>, ty: &Type, ind: &str) {
+    match dest {
+        Some(dest) => {
+            let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
+        }
+        None if *ty != Type::Void => {
+            let _ = writeln!(out, "{ind}drop");
+        }
+        None => {}
+    }
+}
+
+/// The wasm type section key for an indirect call: the env parameter first,
+/// then the signature's parameter types, then the result (omitted for void).
+fn signature_key(params: &[Type], return_type: &Type) -> String {
+    let mut key = String::from("(func (param i32");
+    for param in params {
+        key.push(' ');
+        key.push_str(wasm_type(param));
+    }
+    key.push(')');
+    if *return_type != Type::Void {
+        key.push_str(&format!(" (result {})", wasm_type(return_type)));
+    }
+    key.push(')');
+    key
 }
 
 /// Comparison and arithmetic ops operate on `int` (i64) operands; bool
@@ -526,7 +629,16 @@ fn collect_string_literals(module: &Module) -> Vec<(u32, String)> {
                             check_value(arg);
                         }
                     }
-                    _ => {}
+                    Instruction::CallIndirect { args, .. } => {
+                        for arg in args {
+                            check_value(arg);
+                        }
+                    }
+                    Instruction::MakeClosure { captures, .. } => {
+                        for cap in captures {
+                            check_value(cap);
+                        }
+                    }
                 }
             }
         }
@@ -541,6 +653,104 @@ fn string_heap_base(literals: &[(u32, String)]) -> u32 {
         .last()
         .map_or(1024, |(addr, text)| addr + text.len() as u32 + 1);
     (end + 7) & !7
+}
+
+/// Closure block layout, mirroring the C runtime's `rune_closure_new`/
+/// `rune_closure_set`: word 0 is the code word (here the wrapper's table
+/// index), captures occupy 8-byte slots after it.
+fn closure_capture_offset(idx: usize) -> u32 {
+    8 * (idx as u32 + 1)
+}
+
+fn closure_block_size(n_captures: usize) -> u32 {
+    8 * (n_captures as u32 + 1)
+}
+
+/// Unique functions referenced by MakeClosure instructions, in first-use
+/// order, with their capture counts. The position in this list is the
+/// function's table index.
+fn closure_targets(module: &Module) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for func in &module.functions {
+        for block in &func.body {
+            for inst in &block.instructions {
+                if let Instruction::MakeClosure {
+                    func: target,
+                    captures,
+                    ..
+                } = inst
+                    && !out.iter().any(|(name, _)| name == target)
+                {
+                    out.push((target.clone(), captures.len()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every `call_indirect` signature in the module, deduped in first-use
+/// order as `(type-section key, id)` pairs.
+fn indirect_signatures(module: &Module) -> Vec<(String, u32)> {
+    let mut out: Vec<(String, u32)> = Vec::new();
+    for func in &module.functions {
+        let locals = local_types(func);
+        for block in &func.body {
+            for inst in &block.instructions {
+                if let Instruction::CallIndirect { callee, .. } = inst {
+                    let signature = match value_type(callee, &locals) {
+                        Type::Function {
+                            params,
+                            return_type,
+                        } => signature_key(&params, &return_type),
+                        other => unreachable!(
+                            "indirect callee has non-function type {other:?} in `{}`",
+                            func.name
+                        ),
+                    };
+                    if !out.iter().any(|(key, _)| *key == signature) {
+                        let id = out.len() as u32;
+                        out.push((signature, id));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Emits the env-first wrapper for a closure target: takes the closure
+/// pointer as `$rune_env`, forwards the user parameters plus the captures
+/// loaded from the closure block's i64 slots.
+fn emit_closure_wrapper(out: &mut String, target: &Function, n_caps: usize) {
+    let n_user = target.params.len() - n_caps;
+    let _ = write!(out, "  (func $f_rune_closure_{}", target.name);
+    let _ = write!(out, " (param $rune_env i32)");
+    for (name, ty) in &target.params[..n_user] {
+        let _ = write!(out, " (param {} {})", local_ref(name), wasm_type(ty));
+    }
+    if target.return_type != Type::Void {
+        let _ = write!(out, " (result {})", wasm_type(&target.return_type));
+    }
+    out.push('\n');
+    let ind = "    ";
+    let _ = write!(out, "{ind}(call $f_{}", target.name);
+    for (name, _) in &target.params[..n_user] {
+        let _ = write!(out, "\n{ind}  (local.get {})", local_ref(name));
+    }
+    for (i, (_, ty)) in target.params[n_user..].iter().enumerate() {
+        let load = format!(
+            "(i64.load offset={} (local.get $rune_env))",
+            closure_capture_offset(i)
+        );
+        // Folded form: narrow non-int captures back to their wasm type.
+        if *ty != Type::Int {
+            let _ = write!(out, "\n{ind}  (i32.wrap_i64 {load})");
+        } else {
+            let _ = write!(out, "\n{ind}  {load}");
+        }
+    }
+    out.push_str("))\n\n");
 }
 
 /// Escapes a Rune string as a WAT data-segment string (bytes with `\"` and
@@ -568,7 +778,7 @@ fn emit_value(
     value: &Value,
     _ind: &str,
     _locals: &[(String, Type)],
-    literals: &[(u32, String)],
+    ctx: &EmitCtx,
 ) {
     match value {
         Value::ConstInt(v) => {
@@ -579,7 +789,8 @@ fn emit_value(
         }
         Value::ConstString(text) => {
             // The literal's address in linear memory (from the data segments).
-            let addr = literals
+            let addr = ctx
+                .literals
                 .iter()
                 .find(|(_, t)| t == text)
                 .map(|(a, _)| *a)

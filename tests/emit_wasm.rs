@@ -3,8 +3,8 @@
 //! Tests for the WebAssembly (text format) backend.
 //!
 //! Structural checks run everywhere; the final test validates the generated
-//! WAT with `wat2wasm` (wabt) when it is on the PATH. CI installs wabt and
-//! additionally runs the generated module in Node.
+//! WAT with `wat2wasm` (wabt) when it is on the PATH, skipping gracefully
+//! when it is not installed.
 
 mod common;
 
@@ -95,19 +95,77 @@ fn string_concat_and_comparison_use_the_runtime_prelude() {
 }
 
 #[test]
-fn function_values_are_rejected_with_a_clear_error() {
-    let module = common::analyze(
-        "fn twice(n: int) -> int { return n * 2 }
-        fn main() { let f = twice print(f(3)) }",
-    );
-    let err =
-        wasm::generate(&lower_program(&module)).expect_err("function values should be rejected");
-    assert!(err.contains("does not support"));
-    assert!(err.contains("`main`"));
+fn function_references_become_table_entries_and_indirect_calls() {
+    let out = wat("fn twice(n: int) -> int { return n * 2 }
+        fn main() { let f = twice print(f(3)) }");
+    // one table entry and one env-first wrapper per closure target
+    assert!(out.contains("(table 1 funcref)"));
+    assert!(out.contains("(elem (i32.const 0) func $f_rune_closure_twice)"));
+    assert!(out.contains(
+        "(func $f_rune_closure_twice (param $rune_env i32) (param $l_n i64) (result i64)"
+    ));
+    // the closure block holds the table index as its code word
+    assert!(out.contains("i32.const 8"));
+    assert!(out.contains("call $f_rune_alloc"));
+    assert!(out.contains("i32.store"));
+    // the call reads the code word and goes through the table
+    assert!(out.contains("i32.load"));
+    assert!(out.contains("call_indirect (type $t0)"));
+    assert!(out.contains("(type $t0 (func (param i32 i64) (result i64)))"));
+}
+
+#[test]
+fn anonymous_functions_hoist_and_wrap() {
+    let out = wat("fn main() { let f = fn(x: int) -> int { return x + 1 } print(f(1)) }");
+    assert!(out.contains("(func $f_rune_lambda_0"));
+    assert!(out.contains("(elem (i32.const 0) func $f_rune_closure_rune_lambda_0)"));
+    assert!(out.contains("call_indirect (type $t0)"));
+}
+
+#[test]
+fn captured_variables_are_stored_in_the_closure_env() {
+    let out = wat("fn main() {
+            let a = 3
+            let b = true
+            let f = fn() -> int { if b { return a } return 0 }
+            print(f())
+        }");
+    // captures are stored as i64 slots past the code word
+    assert!(out.contains("i64.store offset=8"));
+    // a bool capture is narrowed back; an int capture is forwarded raw
+    assert!(out.contains("(i32.wrap_i64 (i64.load offset=8 (local.get $rune_env)))"));
+    assert!(out.contains("(i64.load offset=16 (local.get $rune_env))"));
+    // two captures, both slots, i64 slots widened from i32 where needed
+    assert!(out.contains("i64.extend_i32_u"));
+    assert!(out.contains("i64.store offset=16"));
+}
+
+#[test]
+fn void_signatures_get_no_result_type_and_discarded_values_are_dropped() {
+    // an if/else lambda body produces a void-returning signature
+    let out = wat("fn main() { let f = fn(x: int) { if x > 0 { print(x) } } f(1) }");
+    assert!(out.contains("(type $t0 (func (param i32 i64)))"));
+    assert!(!out.contains("(type $t0 (func (param i32 i64)) (result"));
+    // a non-void call made as a statement must drop its result
+    let out = wat("fn g(n: int) -> int { return n } fn main() { g(1) print(2) }");
+    assert!(out.contains("drop"));
+}
+
+#[test]
+fn string_arguments_to_indirect_calls_get_data_segments() {
+    let out = wat("fn main() {
+            let g = fn(s: string) -> string { return s + \"!\" }
+            print(g(\"hey\"))
+        }");
+    // the argument literal must have a data segment, not fall back to
+    // address 0
+    assert!(out.contains("(data (i32.const 1024) \"hey\\00\")"));
+    assert!(out.contains("call_indirect (type $t0)"));
+    assert!(out.contains("(type $t0 (func (param i32 i32) (result i32)))"));
 }
 
 /// Validates the generated WAT with wabt's `wat2wasm` when installed.
-/// CI installs wabt, so this runs there; locally it skips gracefully.
+/// Locally it skips gracefully when wabt is absent.
 #[test]
 fn generated_wat_is_valid_wasm() {
     let Ok(_) = std::process::Command::new("wat2wasm")
@@ -124,6 +182,25 @@ fn generated_wat_is_valid_wasm() {
             "fn main() { let x = 10 let y = 20 let sum = x + y * 2 print(sum) if sum > 40 { print(1) } else { print(0) } }",
         ),
         ("fib", include_str!("../examples/fib.rune")),
+        (
+            "function_reference",
+            "fn twice(n: int) -> int { return n * 2 } fn main() { let f = twice print(f(3)) }",
+        ),
+        (
+            "capturing_lambda",
+            "fn make_adder(n: int) -> fn(int) -> int { return fn(x: int) -> int { return x + n } }
+            fn main() { let add1 = make_adder(1) let add2 = make_adder(2) print(add1(10)) print(add2(10)) }",
+        ),
+        (
+            "fn_typed_param",
+            "fn apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+            fn inc(n: int) -> int { return n + 1 }
+            fn main() { print(apply(inc, 5)) }",
+        ),
+        (
+            "void_lambda_statement",
+            "fn g(n: int) -> int { return n } fn main() { g(1) let f = fn(x: int) { print(x) } f(2) }",
+        ),
     ];
     for (name, source) in cases {
         let text = wat(source);

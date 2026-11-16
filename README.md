@@ -126,7 +126,6 @@ More examples live in [`examples/`](examples).
 ## Roadmap
 
 - [ ] Cut the first tagged release (see [CHANGELOG.md](CHANGELOG.md))
-- [ ] Function values in the WASM backend (needs reference types)
 - [ ] LLVM backend
 
 ## Contributing

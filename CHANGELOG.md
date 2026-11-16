@@ -6,9 +6,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing has been released yet; everything below describes the state of the
-`main` branch and will become the contents of the first release (v0.1.0)
-when it is tagged.
+Nothing yet.
+
+## [0.1.0] - 2026-11-16
+
+First tagged release.
 
 ### Language
 
@@ -27,6 +29,9 @@ when it is tagged.
 - Strings: comparison with `==`/`!=` (contents, via `strcmp`) and
   concatenation with `+`/`+=` (via a runtime helper; results are currently
   leaked by design)
+- Anonymous functions (`fn(x: int) -> int { ... }` as an expression) and
+  `fn(...) -> ...` function types: functions are first-class values, with
+  by-value capture (assigning to a captured variable is rejected)
 
 ### Compiler
 
@@ -49,15 +54,17 @@ when it is tagged.
 
 - `rune` CLI: compiles `.rune` files to C, invokes `gcc`, produces a binary
 - `irdebug` binary: dumps the IR before and after each pass
-- Test suite (110 tests) across lexer, parser, checker, IR passes, codegen,
+- Test suite (169 tests) across lexer, parser, checker, IR passes, codegen,
   and end-to-end binaries that compile with `gcc` and check output
 - `rune --wat`: a WebAssembly text-format backend emitting from the same
   IR, with host imports for `print` and strings living in linear memory
-  (data segments plus a bump-allocating runtime prelude; function values
-  are rejected with clear errors until reference types)
-- CI on every push and PR: formatting, clippy, build, tests, a pipeline
-  smoke test, and a WASM job that validates the generated WAT with wabt and
-  executes fib in Node
+  (data segments plus a bump-allocating runtime prelude). Function values
+  work on both backends: a value is a closure block (`[code word, captures]`)
+  reached through `call_indirect` over a funcref table of env-first wrappers
+  — baseline WASM 1.0, no reference-types proposal needed
+- CI on every push and PR: formatting, clippy, build, tests, and a pipeline
+  smoke test; the test suite validates the generated WAT with `wat2wasm`
+  (wabt) when it is installed and skips that check otherwise
 
 ### Fixed
 
@@ -65,12 +72,18 @@ when it is tagged.
   non-constant reassignment (`x = f()` now correctly invalidates `x`)
 - String escapes (`\n`, `\t`, `\"`, `\\`) are re-encoded when emitting C;
   previously a string containing an escaped quote produced invalid C
+- Env-first closure wrappers now load captured values from the closure
+  block; previously capturing lambdas forwarded garbage for their captures
+  (they worked only when a register happened to still hold the value)
+- The WASM backend no longer leaves a stray value on the operand stack when
+  a non-void call is made as a statement, and string literals passed as
+  arguments to indirect calls now get data segments
 
 ### Known limitations
 
 - No arrays, structs, or containers; strings are immutable values without
   ownership tracking (concatenation leaks)
-- No functions-as-values or closures
+- No generics
 - No standard library to speak of (`std/core.rune` is a placeholder)
 - The IR-to-C output uses labels and gotos rather than structured control
   flow
