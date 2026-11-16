@@ -28,41 +28,45 @@ pub fn generate(module: &Module) -> String {
     // Closures call their target through env-first wrappers; declare and
     // define one for every function a MakeClosure references.
     let closure_targets = closure_targets(module);
-    for name in &closure_targets {
+    for (name, n_caps) in &closure_targets {
         let target = module
             .functions
             .iter()
             .find(|f| &f.name == name)
             .expect("closure target must be a declared function");
-        let _ = writeln!(out, "{};", closure_wrapper_signature(target));
+        let _ = writeln!(out, "{};", closure_wrapper_signature(target, *n_caps));
     }
     out.push('\n');
 
     for func in &module.functions {
         emit_function(&mut out, func);
     }
-    for name in closure_targets {
+    for (name, n_caps) in closure_targets {
         let target = module
             .functions
             .iter()
             .find(|f| f.name == name)
             .expect("closure target must be a declared function");
-        emit_closure_wrapper(&mut out, target);
+        emit_closure_wrapper(&mut out, target, n_caps);
     }
     out
 }
 
 /// The env-first wrapper for a closure target: drops the environment and
-/// forwards to the real function.
+/// forwards to the real function (captures are loaded from the closure
+/// block, matching `rune_closure_set`'s layout).
 fn closure_wrapper_name(func: &str) -> String {
     format!("rune_closure_{func}")
 }
 
-fn closure_wrapper_signature(target: &Function) -> String {
+/// The env-first wrapper's signature: the closure pointer followed by the
+/// target's user parameters (the captures appended by lowering are loaded
+/// from the closure block, not passed by the caller).
+fn closure_wrapper_signature(target: &Function, n_caps: usize) -> String {
+    let n_user = target.params.len() - n_caps;
     let params = std::iter::once("void *env".to_string())
         .chain(
-            target
-                .params
+            target.params[..n_user]
                 .iter()
                 .map(|(n, ty)| super::ctype::c_decl(ty, n)),
         )
@@ -74,33 +78,46 @@ fn closure_wrapper_signature(target: &Function) -> String {
     )
 }
 
-fn emit_closure_wrapper(out: &mut String, target: &Function) {
-    out.push_str(&closure_wrapper_signature(target));
+fn emit_closure_wrapper(out: &mut String, target: &Function, n_caps: usize) {
+    out.push_str(&closure_wrapper_signature(target, n_caps));
     out.push_str(" {\n    (void)env;\n    ");
     if target.return_type != Type::Void {
         out.push_str("return ");
     }
+    let n_user = target.params.len() - n_caps;
     let _ = write!(out, "{}(", target.name);
-    for (i, (name, _)) in target.params.iter().enumerate() {
+    for (i, (name, _)) in target.params[..n_user].iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
         out.push_str(name);
     }
+    // Captures live in the closure block after the code word
+    // (rune_closure_set stores them at index i + 1).
+    for (i, _) in target.params[n_user..].iter().enumerate() {
+        if i > 0 || n_user > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "((int64_t *)env)[{}]", i + 1);
+    }
     out.push_str(");\n}\n\n");
 }
 
 /// Unique functions referenced by MakeClosure instructions, in first-use
-/// order.
-fn closure_targets(module: &Module) -> Vec<String> {
-    let mut names = Vec::new();
+/// order, with their capture counts.
+fn closure_targets(module: &Module) -> Vec<(String, usize)> {
+    let mut names: Vec<(String, usize)> = Vec::new();
     for func in &module.functions {
         for block in &func.body {
             for inst in &block.instructions {
-                if let Instruction::MakeClosure { func: target, .. } = inst
-                    && !names.contains(target)
+                if let Instruction::MakeClosure {
+                    func: target,
+                    captures,
+                    ..
+                } = inst
+                    && !names.iter().any(|(n, _)| n == target)
                 {
-                    names.push(target.clone());
+                    names.push((target.clone(), captures.len()));
                 }
             }
         }

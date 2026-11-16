@@ -224,12 +224,17 @@ representation.
   block becomes a case in a `br_table`, and each terminator sets a dispatch
   register (`$rune_pc`) and restarts the loop. This is correct for arbitrary
   control-flow graphs without a relooping pass.
-- `print` is provided by host imports (`rune.print_int` / `rune.print_bool`);
-  hosts embed the module and supply the functions.
-- Strings and function values are rejected with clear errors (WASM has no
-  native strings, and function references need the reference-types proposal).
-- Validate output with `wat2wasm` (wabt); CI compiles and _executes_ the
-  generated module in Node, verifying fib's output.
+- `print` is provided by host imports (`rune.print_int` / `rune.print_bool` /
+  `rune.print_string`); hosts embed the module and supply the functions.
+- Function values mirror the C backend's closure convention without needing
+  the reference-types proposal: a value is an i32 pointer to a closure block
+  in linear memory (`[code word, captures...]`, allocated by the same bump
+  allocator), the code word is a **table index** into a funcref table, and
+  `call_indirect` dispatches through env-first wrapper functions — all
+  baseline WASM 1.0. Captures are stored as i64 slots; narrow values are
+  widened on store and narrowed by the wrapper on load.
+- Validate output with `wat2wasm` (wabt); the test suite runs `wat2wasm`
+  when it is installed and skips the check otherwise.
 
 ## Runtime (`runtime/`)
 
@@ -269,7 +274,6 @@ emitters read the same `Module` the C emitter does.
 - No first-class strings, arrays, or structs (strings support comparison
   and concatenation, but cannot be stored in containers; concatenation
   results are leaked by design — see the runtime section)
-- No functions-as-values or closures
 - `DeadCodeElim` uses a function-global used-set, so dead stores whose
   variables are read _somewhere_ are kept; a precise liveness analysis would
   remove more

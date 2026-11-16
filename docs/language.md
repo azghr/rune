@@ -153,7 +153,7 @@ definition order never matters.
 ## Current limitations
 
 - No arrays, structs, tuples, or containers of any kind
-- No functions-as-values, closures, or generics
+- No generics
 - No type inference beyond `let` bindings; no enums or sum types
 - Concatenated strings are heap-allocated and never freed (no ownership
   tracking yet)
