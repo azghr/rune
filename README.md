@@ -26,6 +26,9 @@ and linked against a small C runtime.
 - C-family syntax: functions, `let`/`let mut` bindings, `if`/`else if`/`else`,
   `while`, `for`, `break`/`continue`, `return`, and compound assignment
   (`+=` etc.)
+- Arrays `[T]` with bounds-checked indexing and the `len` builtin
+- Anonymous functions (`fn(n: int) -> int { ... }` as an expression) with
+  by-value closure capture
 - Logical operators (`&&`, `||`) with correct precedence
 - Immutability by default: only `mut` variables can be reassigned
 - String comparison with `==`/`!=` compares contents
@@ -47,6 +50,8 @@ and linked against a small C runtime.
 
 - Rust 1.85 or newer (Rune uses edition 2024)
 - A C compiler (`gcc`) on your `PATH`
+- For `rune --llvm`, `clang`; for `rune --wat`, any WASM host
+  ([wat2wasm](https://github.com/WebAssembly/wabt) validates the output)
 
 ### Building
 
@@ -94,8 +99,9 @@ fn main() {
 }
 ```
 
-- `print(expr)` is the only builtin; it prints an integer, bool, or string
-  followed by a newline (via the C runtime).
+- `print(expr)` prints an integer, bool, or string followed by a newline
+  (via the C runtime); `len(arr)` returns an array's length.
+- Variables are immutable by default; declare them `let mut` to reassign.
 - Variables are immutable by default; declare them `let mut` to reassign.
 - Statements are newline/semicolon separated; semicolons are accepted.
 - All integers are 64-bit signed (`i64` / C `int64_t`).

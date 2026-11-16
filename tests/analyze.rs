@@ -542,3 +542,48 @@ fn arrays_can_be_passed_and_returned() {
     );
     assert_eq!(program.functions.len(), 3);
 }
+
+#[test]
+fn errors_on_duplicate_parameters() {
+    let errs = analyze_errors("fn f(a: int, a: string) -> int { return a } fn main() { }");
+    assert!(
+        errs.iter().any(|e| e.message.contains("already defined")),
+        "expected a duplicate-parameter error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn errors_on_main_with_parameters() {
+    let errs = analyze_errors("fn main(a: int) { print(a) }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("`main` must not take parameters")),
+        "expected a main-signature error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn errors_on_break_inside_an_anonymous_function_in_a_loop() {
+    let errs = analyze_errors(
+        "fn main() { let mut i = 0 while i < 3 { let f = fn() { break } f() i += 1 } }",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("`break` outside of a loop")),
+        "expected a break-outside-loop error, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn errors_on_compound_assignment_to_a_captured_variable() {
+    let errs = analyze_errors("fn main() { let mut x = 1 let f = fn() { x += 1 } f() }");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("cannot assign to captured variable")),
+        "expected a captured-assignment error, got: {:?}",
+        errs
+    );
+}

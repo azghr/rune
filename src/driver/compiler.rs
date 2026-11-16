@@ -8,12 +8,16 @@ use crate::language::analyze::Analyzer;
 use crate::language::lexer::Lexer;
 use crate::language::parser::Parser;
 use crate::shared::source::SourceFile;
+use crate::transform::ir::Module;
 use crate::transform::{ConstFold, DeadCodeElim, lower_program};
 
 pub struct Compiler;
 
 impl Compiler {
-    pub fn compile(source_name: &str, source_text: &str) -> Result<String, String> {
+    /// Runs the whole front end — lex, parse, analyze — then lowers to the
+    /// IR and applies the transform passes. Any stage's diagnostics are
+    /// reported to stderr and `compilation failed` is returned.
+    pub fn lower(source_name: &str, source_text: &str) -> Result<Module, String> {
         let source = SourceFile::new(source_name, source_text);
         let reporter = Reporter::new(&source);
 
@@ -48,9 +52,12 @@ impl Compiler {
         let mut module = lower_program(&program);
         ConstFold::run(&mut module);
         DeadCodeElim::run(&mut module);
+        Ok(module)
+    }
 
-        // 5. Emit C
-        let c_code = ir::generate(&module);
-        Ok(c_code)
+    /// Compiles to C (see `lower` for the shared front end).
+    pub fn compile(source_name: &str, source_text: &str) -> Result<String, String> {
+        let module = Self::lower(source_name, source_text)?;
+        Ok(ir::generate(&module))
     }
 }

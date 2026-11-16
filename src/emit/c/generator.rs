@@ -91,7 +91,7 @@ impl CGenerator {
             .join(", ");
         super::ctype::c_signature(
             &func.return_type.clone().unwrap_or(Type::Void),
-            &format!("{}({})", func.name, params),
+            &format!("{}({})", super::ctype::c_name(&func.name), params),
         )
     }
 
@@ -133,14 +133,26 @@ impl CGenerator {
                 if matches!(op, TokenKind::Plus | TokenKind::PlusEq)
                     && self.var_type(name) == Some(Type::String)
                 {
-                    write!(self.output, "{} = rune_strcat({}, ", name, name).unwrap();
+                    write!(
+                        self.output,
+                        "{} = rune_strcat({}, ",
+                        super::ctype::c_name(name),
+                        super::ctype::c_name(name)
+                    )
+                    .unwrap();
                     self.emit_expr(value);
                     self.output.push(')');
                 } else if *op == TokenKind::Eq {
-                    write!(self.output, "{} = ", name).unwrap();
+                    write!(self.output, "{} = ", super::ctype::c_name(name)).unwrap();
                     self.emit_expr(value);
                 } else {
-                    write!(self.output, "{} {}= ", name, Self::op_to_c(op)).unwrap();
+                    write!(
+                        self.output,
+                        "{} {}= ",
+                        super::ctype::c_name(name),
+                        Self::op_to_c(op)
+                    )
+                    .unwrap();
                     self.emit_expr(value);
                 }
             }
@@ -287,16 +299,28 @@ impl CGenerator {
                     && self.var_type(name) == Some(Type::String)
                 {
                     // String `+=` is concatenation through the runtime.
-                    write!(self.output, "{} = rune_strcat({}, ", name, name).unwrap();
+                    write!(
+                        self.output,
+                        "{} = rune_strcat({}, ",
+                        super::ctype::c_name(name),
+                        super::ctype::c_name(name)
+                    )
+                    .unwrap();
                     self.emit_expr(value);
                     self.output.push_str(");\n");
                 } else if *op == TokenKind::Eq {
-                    write!(self.output, "{} = ", name).unwrap();
+                    write!(self.output, "{} = ", super::ctype::c_name(name)).unwrap();
                     self.emit_expr(value);
                     self.output.push_str(";\n");
                 } else {
                     // Numeric compound assignment maps directly to C.
-                    write!(self.output, "{} {}= ", name, Self::op_to_c(op)).unwrap();
+                    write!(
+                        self.output,
+                        "{} {}= ",
+                        super::ctype::c_name(name),
+                        Self::op_to_c(op)
+                    )
+                    .unwrap();
                     self.emit_expr(value);
                     self.output.push_str(";\n");
                 }
@@ -404,12 +428,20 @@ impl CGenerator {
 
     fn emit_expr(&mut self, expr: &Expr) {
         match expr {
-            Expr::Int { value, .. } => write!(self.output, "{}", value).unwrap(),
+            Expr::Int { value, .. } => {
+                // `i64::MIN` is not a valid C int64 literal; use the
+                // standard parenthesized idiom.
+                if *value == i64::MIN {
+                    self.output.push_str("(-9223372036854775807LL - 1)");
+                } else {
+                    write!(self.output, "{}", value).unwrap()
+                }
+            }
             Expr::Bool { value, .. } => self.output.push_str(if *value { "true" } else { "false" }),
             Expr::String { value, .. } => {
                 write!(self.output, "\"{}\"", Self::escape_c_string(value)).unwrap()
             }
-            Expr::Variable { name, .. } => self.output.push_str(name),
+            Expr::Variable { name, .. } => self.output.push_str(&super::ctype::c_name(name)),
             Expr::ArrayLiteral { .. } | Expr::Index { .. } => panic!(
                 "the reference AST-to-C generator does not support arrays; \
                  compile through the IR pipeline instead"
@@ -445,6 +477,23 @@ impl CGenerator {
                     self.output.push_str(", ");
                     self.emit_expr(right);
                     write!(self.output, ") {})", cmp).unwrap();
+                    return;
+                }
+
+                if matches!(op, TokenKind::Slash | TokenKind::Percent) {
+                    // Division goes through the runtime helpers, which
+                    // abort on a zero divisor instead of hitting C's
+                    // undefined behavior.
+                    let helper = if *op == TokenKind::Slash {
+                        "rune_div"
+                    } else {
+                        "rune_mod"
+                    };
+                    self.output.push_str(&format!("({helper}("));
+                    self.emit_expr(left);
+                    self.output.push_str(", ");
+                    self.emit_expr(right);
+                    self.output.push_str("))");
                     return;
                 }
 

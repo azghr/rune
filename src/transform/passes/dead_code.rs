@@ -167,6 +167,14 @@ impl DeadCodeElim {
                     // Array writes and allocations have side effects.
                     | Instruction::MakeArray { .. }
                     | Instruction::IndexSet { .. }
+                    // Division and indexed reads can trap at runtime
+                    // (zero divisor, out-of-bounds index); keep them even
+                    // when their result is unused, or the trap disappears.
+                    | Instruction::Binary {
+                        op: BinOp::Div | BinOp::Mod,
+                        ..
+                    }
+                    | Instruction::IndexGet { .. }
             ) || Self::dest_of(inst).is_some_and(|dest| live.contains(&dest));
 
             if keep {

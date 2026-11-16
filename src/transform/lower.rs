@@ -1052,6 +1052,16 @@ fn walk_capture_expr(
             walk_capture_expr(array, declared, lowerer, captures, seen);
             walk_capture_expr(index, declared, lowerer, captures, seen);
         }
+        Expr::AnonymousFunction { params, body, .. } => {
+            // A free variable of an inner lambda is free here too, so this
+            // lambda must capture it for the inner one to read. The inner
+            // lambda's own parameters and locals shadow, so they join the
+            // declared set.
+            let mut inner_declared = declared.clone();
+            inner_declared.extend(params.iter().map(|p| p.name.clone()));
+            collect_declared_names(&body.statements, &mut inner_declared);
+            walk_capture_reads(&body.statements, &inner_declared, lowerer, captures, seen);
+        }
         _ => {}
     }
 }

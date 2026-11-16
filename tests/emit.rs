@@ -67,11 +67,15 @@ fn dispatches_print_by_argument_type() {
 }
 
 #[test]
-fn maps_arithmetic_operators_verbatim() {
+fn maps_add_sub_mul_verbatim_and_div_mod_through_the_runtime() {
     let c = generate("fn main() { let x = 1 + 2 - 3 * 4 / 5 % 6 print(x) }");
-    for op in ["+", "-", "*", "/", "%"] {
+    for op in ["+", "-", "*"] {
         assert!(c.contains(op), "missing operator `{op}` in:\n{c}");
     }
+    // Division and remainder go through the runtime helpers, which abort
+    // on a zero divisor instead of hitting C's undefined behavior.
+    assert!(c.contains("rune_div("), "missing rune_div in:\n{c}");
+    assert!(c.contains("rune_mod("), "missing rune_mod in:\n{c}");
 }
 
 #[test]
@@ -218,4 +222,19 @@ fn pointer_captures_are_cast_back_in_wrappers() {
     .expect("compiles");
     assert!(c.contains("(const char*)((int64_t *)env)[1]"));
     assert!(c.contains("(void*)((int64_t *)env)[1]"));
+}
+
+#[test]
+fn escapes_c_keywords_in_user_names() {
+    // Rune identifiers that collide with C keywords must not be emitted
+    // verbatim, or the generated C fails to compile.
+    let c = generate("fn main() { let double = 7 let register = double + 1 print(register) }");
+    assert!(
+        c.contains("int64_t double_ = 7;"),
+        "unescaped `double` in:\n{c}"
+    );
+    assert!(
+        c.contains("register_ = (double_ + 1);"),
+        "`register` mishandled in:\n{c}"
+    );
 }

@@ -236,6 +236,18 @@ pub fn generate(module: &Module) -> Result<String, String> {
 
 /// The WASM value type for a Rune type. Function values are closure
 /// pointers into linear memory.
+/// The WASM instruction that pushes a zero of the type a fall-through
+/// `return` must produce, or an empty string for `void`.
+fn fallthrough_zero(ty: &Type) -> &'static str {
+    match wasm_type(ty) {
+        "" => "",
+        w => match w {
+            "i64" => "i64.const 0",
+            _ => "i32.const 0",
+        },
+    }
+}
+
 fn wasm_type(ty: &Type) -> &'static str {
     match ty {
         Type::Int => "i64",
@@ -336,6 +348,7 @@ fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)], ctx: 
     let blocks = &func.body;
     let n = blocks.len();
     let ind = "    "; // depth 1: inside the func
+    let fallthrough_zero = fallthrough_zero(&func.return_type);
 
     let _ = writeln!(out, "{ind}(block $rune_exit");
     let _ = writeln!(out, "{ind}  (loop $rune_top");
@@ -359,7 +372,14 @@ fn emit_body(out: &mut String, func: &Function, locals: &[(String, Type)], ctx: 
 
     for block in blocks {
         let _ = writeln!(out, "{ind}    )");
-        emit_block_case(out, block, &format!("{ind}    "), locals, ctx);
+        emit_block_case(
+            out,
+            block,
+            &format!("{ind}    "),
+            locals,
+            ctx,
+            fallthrough_zero,
+        );
     }
 
     let _ = writeln!(out, "{ind}  )");
@@ -379,6 +399,7 @@ fn emit_block_case(
     ind: &str,
     locals: &[(String, Type)],
     ctx: &EmitCtx,
+    fallthrough_zero: &str,
 ) {
     let case = ind.to_string(); // cases sit one level deeper than their label
     for inst in &block.instructions {
@@ -390,7 +411,15 @@ fn emit_block_case(
             let _ = writeln!(out, "{ind}return");
         }
         Terminator::Return(None) => {
-            let _ = writeln!(out, "{ind}return");
+            // Falling off the end returns zero, matching the C backend
+            // (and satisfying functions declared non-void). An empty
+            // string means the function is void and just returns.
+            if !fallthrough_zero.is_empty() {
+                let _ = writeln!(out, "{ind}{fallthrough_zero}");
+                let _ = writeln!(out, "{ind}return");
+            } else {
+                let _ = writeln!(out, "{ind}return");
+            }
         }
         Terminator::Jump(target) => {
             let _ = writeln!(out, "{ind}(i32.const {target})");
@@ -431,7 +460,7 @@ fn emit_instruction(
             left,
             op,
             right,
-            ty,
+            ty: _,
         } => {
             emit_value(out, left, ind, locals, ctx);
             emit_value(out, right, ind, locals, ctx);
@@ -450,7 +479,10 @@ fn emit_instruction(
                     }
                 }
             } else {
-                let _ = writeln!(out, "{ind}{}", wasm_bin_op(op, ty));
+                // The operand type picks the opcode width: bools are i32,
+                // ints are i64 (the instruction's own `ty` is the result's).
+                let operand_ty = value_type(left, locals);
+                let _ = writeln!(out, "{ind}{}", wasm_bin_op(op, &operand_ty));
             }
             let _ = writeln!(out, "{ind}local.set {}", local_ref(dest));
         }
@@ -654,8 +686,13 @@ fn signature_key(params: &[Type], return_type: &Type) -> String {
 
 /// Comparison and arithmetic ops operate on `int` (i64) operands; bool
 /// operands never reach a Binary (And/Or are lowered to control flow).
+/// The opcode for a binary operator on `ty`-typed operands (not the
+/// instruction's result type — comparisons take `int` or `bool` operands
+/// and always produce a `bool`).
 fn wasm_bin_op(op: &BinOp, ty: &Type) -> &'static str {
     match (op, ty) {
+        (BinOp::Eq, Type::Bool) => "i32.eq",
+        (BinOp::NotEq, Type::Bool) => "i32.ne",
         (BinOp::Eq, _) => "i64.eq",
         (BinOp::NotEq, _) => "i64.ne",
         (BinOp::Lt, _) => "i64.lt_s",

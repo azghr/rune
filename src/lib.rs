@@ -7,6 +7,6 @@ pub mod driver;
 pub mod emit;
 pub mod language;
 pub mod shared;
-pub mod transform; // still mostly empty for now
+pub mod transform;
 
 pub use driver::Compiler;

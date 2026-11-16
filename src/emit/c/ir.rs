@@ -85,12 +85,12 @@ fn emit_closure_wrapper(out: &mut String, target: &Function, n_caps: usize) {
         out.push_str("return ");
     }
     let n_user = target.params.len() - n_caps;
-    let _ = write!(out, "{}(", target.name);
+    let _ = write!(out, "{}(", super::ctype::c_name(&target.name));
     for (i, (name, _)) in target.params[..n_user].iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
-        out.push_str(name);
+        out.push_str(&super::ctype::c_name(name));
     }
     // Captures live in the closure block after the code word
     // (rune_closure_set stores them at index i + 1) as raw i64 slots;
@@ -152,7 +152,10 @@ fn signature(func: &Function) -> String {
         .map(|(name, ty)| super::ctype::c_decl(ty, name))
         .collect::<Vec<_>>()
         .join(", ");
-    super::ctype::c_signature(&func.return_type, &format!("{}({})", func.name, params))
+    super::ctype::c_signature(
+        &func.return_type,
+        &format!("{}({})", super::ctype::c_name(&func.name), params),
+    )
 }
 
 /// Collects the type of every local (variable or temp) declared by the
@@ -267,7 +270,7 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             ty,
             ..
         } => {
-            let _ = write!(out, "{} = ", dest);
+            let _ = write!(out, "{} = ", super::ctype::c_name(dest));
             if *op == BinOp::Add && *ty == Type::String {
                 // Concatenation goes through the runtime helper; the result
                 // is heap-allocated and never freed (see rune_rt.c).
@@ -291,6 +294,20 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
                 out.push_str(", ");
                 emit_value(out, right);
                 let _ = write!(out, ") {}", cmp);
+            } else if matches!(op, BinOp::Div | BinOp::Mod) {
+                // Division goes through the runtime helpers, which abort on
+                // a zero divisor instead of hitting C's undefined behavior.
+                let helper = if *op == BinOp::Div {
+                    "rune_div"
+                } else {
+                    "rune_mod"
+                };
+                out.push_str(helper);
+                out.push('(');
+                emit_value(out, left);
+                out.push_str(", ");
+                emit_value(out, right);
+                out.push(')');
             } else {
                 emit_value(out, left);
                 let _ = write!(out, " {} ", op_to_c(op));
@@ -301,12 +318,17 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
         Instruction::Unary {
             dest, op, value, ..
         } => {
-            let _ = write!(out, "{} = {}", dest, unary_op_to_c(op));
+            let _ = write!(
+                out,
+                "{} = {}",
+                super::ctype::c_name(dest),
+                unary_op_to_c(op)
+            );
             emit_value(out, value);
             out.push_str(";\n");
         }
         Instruction::Move { dest, value, .. } => {
-            let _ = write!(out, "{} = ", dest);
+            let _ = write!(out, "{} = ", super::ctype::c_name(dest));
             emit_value(out, value);
             out.push_str(";\n");
         }
@@ -314,7 +336,7 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             dest, name, args, ..
         } => {
             if let Some(dest) = dest {
-                let _ = write!(out, "{} = ", dest);
+                let _ = write!(out, "{} = ", super::ctype::c_name(dest));
             }
             emit_call(out, name, args, types);
             out.push_str(";\n");
@@ -323,13 +345,13 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             dest, callee, args, ..
         } => {
             if let Some(dest) = dest {
-                let _ = write!(out, "{} = ", dest);
+                let _ = write!(out, "{} = ", super::ctype::c_name(dest));
             }
             // Function values are closures: the code word is the first
             // field of the block. Cast it to an env-first signature and
             // pass the closure itself as the environment.
             let callee_text = match callee {
-                Value::Local(name) => name.clone(),
+                Value::Local(name) => super::ctype::c_name(name),
                 other => unreachable!("non-local callee {other:?} in CallIndirect"),
             };
             let callee_ty = value_type(callee, types);
@@ -376,12 +398,17 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             let _ = writeln!(
                 out,
                 "{} = rune_closure_new((void *){}, {});",
-                dest,
+                super::ctype::c_name(dest),
                 closure_wrapper_name(func),
                 captures.len()
             );
             for (idx, cap) in captures.iter().enumerate() {
-                let _ = write!(out, "rune_closure_set({}, {}, (int64_t)(", dest, idx);
+                let _ = write!(
+                    out,
+                    "rune_closure_set({}, {}, (int64_t)(",
+                    super::ctype::c_name(dest),
+                    idx
+                );
                 emit_value(out, cap);
                 out.push_str("));\n");
             }
@@ -389,9 +416,19 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
         Instruction::MakeArray { dest, elems, .. } => {
             // Allocate an array block: [length, elems...]. Elements go in
             // as raw i64 slots, widened where needed.
-            let _ = writeln!(out, "{} = rune_arr_new({});", dest, elems.len());
+            let _ = writeln!(
+                out,
+                "{} = rune_arr_new({});",
+                super::ctype::c_name(dest),
+                elems.len()
+            );
             for (idx, elem) in elems.iter().enumerate() {
-                let _ = write!(out, "rune_arr_set({}, {}, (int64_t)(", dest, idx);
+                let _ = write!(
+                    out,
+                    "rune_arr_set({}, {}, (int64_t)(",
+                    super::ctype::c_name(dest),
+                    idx
+                );
                 emit_value(out, elem);
                 out.push_str("));\n");
             }
@@ -404,7 +441,7 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
         } => {
             // Bounds-checked reads return i64 slots; narrow back to the
             // element's C type (pointers need an explicit cast).
-            let _ = write!(out, "{} = ", dest);
+            let _ = write!(out, "{} = ", super::ctype::c_name(dest));
             if matches!(
                 super::ctype::c_value_type(ty),
                 Some("const char*") | Some("void*")
@@ -433,7 +470,7 @@ fn emit_instruction(out: &mut String, inst: &Instruction, types: &HashMap<&str, 
             out.push_str("));\n");
         }
         Instruction::ArrLen { dest, array, .. } => {
-            let _ = write!(out, "{} = rune_arr_len(", dest);
+            let _ = write!(out, "{} = rune_arr_len(", super::ctype::c_name(dest));
             emit_value(out, array);
             out.push_str(");\n");
         }
@@ -450,7 +487,7 @@ fn emit_call(out: &mut String, name: &str, args: &[Value], types: &HashMap<&str,
         };
         out.push_str(runtime_fn);
     } else {
-        out.push_str(name);
+        out.push_str(&super::ctype::c_name(name));
     }
     out.push('(');
     for (i, arg) in args.iter().enumerate() {
@@ -465,7 +502,14 @@ fn emit_call(out: &mut String, name: &str, args: &[Value], types: &HashMap<&str,
 fn emit_value(out: &mut String, value: &Value) {
     match value {
         Value::ConstInt(v) => {
-            let _ = write!(out, "{}", v);
+            // `-9223372036854775808` is not a valid C int64 literal (the
+            // digits overflow before the minus applies); use the standard
+            // parenthesized idiom instead.
+            if *v == i64::MIN {
+                out.push_str("(-9223372036854775807LL - 1)");
+            } else {
+                let _ = write!(out, "{}", v);
+            }
         }
         Value::ConstBool(v) => {
             let _ = write!(out, "{}", v);
@@ -474,7 +518,7 @@ fn emit_value(out: &mut String, value: &Value) {
             let _ = write!(out, "\"{}\"", escape_c_string(s));
         }
         Value::Local(name) => {
-            let _ = write!(out, "{}", name);
+            let _ = write!(out, "{}", super::ctype::c_name(name));
         }
     }
 }

@@ -12,10 +12,27 @@ impl Parser {
         self.parse_logical()
     }
 
+    /// `||` binds loosest, then `&&` — `a || b && c` parses as
+    /// `a || (b && c)`, matching the documented precedence table.
     fn parse_logical(&mut self) -> Result<Expr, Diagnostic> {
-        let mut expr = self.parse_equality()?;
+        let mut expr = self.parse_logical_and()?;
+        while self.matches(&[TokenKind::PipePipe]) {
+            let op = self.previous().kind.clone();
+            let right = self.parse_logical_and()?;
+            let span = expr.span().merge(right.span());
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(expr)
+    }
 
-        while self.matches(&[TokenKind::AmpAmp, TokenKind::PipePipe]) {
+    fn parse_logical_and(&mut self) -> Result<Expr, Diagnostic> {
+        let mut expr = self.parse_equality()?;
+        while self.matches(&[TokenKind::AmpAmp]) {
             let op = self.previous().kind.clone();
             let right = self.parse_equality()?;
             let span = expr.span().merge(right.span());
@@ -26,7 +43,6 @@ impl Parser {
                 span,
             };
         }
-
         Ok(expr)
     }
 

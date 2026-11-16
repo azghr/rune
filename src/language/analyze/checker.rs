@@ -51,6 +51,11 @@ impl Analyzer {
         // First pass: collect signatures so calls resolve regardless of
         // definition order.
         for func in &program.functions {
+            // `main` is the entry point: C requires it to take no
+            // parameters.
+            if func.name == "main" && !func.params.is_empty() {
+                self.error("`main` must not take parameters".to_string(), func.span);
+            }
             let signature = FunctionSignature {
                 params: func.params.iter().map(|p| p.ty.clone()).collect(),
                 return_type: func.return_type.clone().unwrap_or(Type::Void),
@@ -83,12 +88,14 @@ impl Analyzer {
         self.current_return_type = func.return_type.clone();
 
         for param in &func.params {
-            let _ = self.scopes.define(Symbol {
+            if let Err(msg) = self.scopes.define(Symbol {
                 name: param.name.clone(),
                 ty: param.ty.clone(),
                 span: param.span,
                 mutable: false,
-            });
+            }) {
+                self.error(msg, param.span);
+            }
         }
 
         self.analyze_block(&func.body);
@@ -148,32 +155,9 @@ impl Analyzer {
                 value,
                 span,
             } => {
-                let sym = match self.scopes.resolve(name) {
-                    Some(sym) => sym.clone(),
-                    None => {
-                        self.error(format!("undefined variable `{}`", name), *span);
-                        return;
-                    }
+                let Some(sym) = self.check_assign_target(name, *span) else {
+                    return;
                 };
-                if !sym.mutable {
-                    self.error(
-                        format!("cannot assign to immutable variable `{}`", name),
-                        *span,
-                    );
-                    return;
-                }
-                if let Some(&entry) = self.lambda_depths.last()
-                    && self.scopes.depth_of(name).is_some_and(|d| d < entry)
-                {
-                    self.error(
-                        format!(
-                            "cannot assign to captured variable `{}`: captures are by value",
-                            name
-                        ),
-                        *span,
-                    );
-                    return;
-                }
 
                 let value_ty = self.analyze_expr(value);
                 if sym.ty != value_ty {
@@ -193,20 +177,9 @@ impl Analyzer {
                 value,
                 span,
             } => {
-                let sym = match self.scopes.resolve(name) {
-                    Some(sym) => sym.clone(),
-                    None => {
-                        self.error(format!("undefined variable `{}`", name), *span);
-                        return;
-                    }
-                };
-                if !sym.mutable {
-                    self.error(
-                        format!("cannot assign to immutable variable `{}`", name),
-                        *span,
-                    );
+                let Some(sym) = self.check_assign_target(name, *span) else {
                     return;
-                }
+                };
 
                 let value_ty = self.analyze_expr(value);
                 // The result of `x <op> value` must be assignable back to x.
@@ -724,16 +697,24 @@ impl Analyzer {
                 self.lambda_depths.push(entry_depth);
                 self.scopes.push();
                 for p in params {
-                    let _ = self.scopes.define(Symbol {
+                    if let Err(msg) = self.scopes.define(Symbol {
                         name: p.name.clone(),
                         ty: p.ty.clone(),
                         span: p.span,
                         mutable: false,
-                    });
+                    }) {
+                        self.error(msg, p.span);
+                    }
                 }
                 let saved_return = self.current_return_type.clone();
                 self.current_return_type = Some(ret.clone());
+                // The body becomes its own function, so enclosing loops do
+                // not carry in: `break`/`continue` inside a lambda are
+                // errors regardless of surrounding loop depth.
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
                 self.analyze_block(body);
+                self.loop_depth = saved_loop_depth;
                 self.current_return_type = saved_return;
                 self.scopes.pop();
                 self.lambda_depths.pop();
@@ -749,6 +730,40 @@ impl Analyzer {
     /// an array and the index an `int`. Returns the element type. Array
     /// elements are mutable through the reference regardless of the
     /// binding's `mut` status (only rebinding the variable needs `let mut`).
+    /// Resolves `name` and reports every condition that makes it
+    /// unassignable: being undefined, immutable, or a captured variable
+    /// (captures are snapshots). Returns the symbol when assignment may
+    /// proceed.
+    fn check_assign_target(&mut self, name: &str, span: Span) -> Option<Symbol> {
+        let sym = match self.scopes.resolve(name) {
+            Some(sym) => sym.clone(),
+            None => {
+                self.error(format!("undefined variable `{}`", name), span);
+                return None;
+            }
+        };
+        if !sym.mutable {
+            self.error(
+                format!("cannot assign to immutable variable `{}`", name),
+                span,
+            );
+            return None;
+        }
+        if let Some(&entry) = self.lambda_depths.last()
+            && self.scopes.depth_of(name).is_some_and(|d| d < entry)
+        {
+            self.error(
+                format!(
+                    "cannot assign to captured variable `{}`: captures are by value",
+                    name
+                ),
+                span,
+            );
+            return None;
+        }
+        Some(sym)
+    }
+
     fn check_index_target(&mut self, array: &Expr, index: &Expr, span: Span) -> Option<Type> {
         let array_ty = self.analyze_expr(array);
         let index_ty = self.analyze_expr(index);

@@ -34,6 +34,8 @@ pub fn generate(module: &Module) -> String {
     out.push_str("declare void @rune_print_string(ptr)\n");
     out.push_str("declare ptr @rune_strcat(ptr, ptr)\n");
     out.push_str("declare i32 @strcmp(ptr, ptr)\n");
+    out.push_str("declare i64 @rune_div(i64, i64)\n");
+    out.push_str("declare i64 @rune_mod(i64, i64)\n");
     out.push_str("declare ptr @rune_closure_new(ptr, i32)\n");
     out.push_str("declare void @rune_closure_set(ptr, i32, i64)\n");
     out.push_str("declare ptr @rune_arr_new(i64)\n");
@@ -252,6 +254,7 @@ fn emit_function(
         literals,
         targets,
         locals: &locals,
+        return_type: func.return_type.clone(),
     };
     for block in &func.body {
         let _ = writeln!(out, "L{}:", block.id);
@@ -322,6 +325,7 @@ struct Emitter<'a> {
     literals: &'a [(String, String, u32)],
     targets: &'a [(String, usize)],
     locals: &'a [(String, Type)],
+    return_type: Type,
 }
 
 impl Emitter<'_> {
@@ -421,9 +425,31 @@ impl Emitter<'_> {
                         }
                     }
                 } else if *ty == Type::Bool {
-                    // Comparisons produce i1 from i64 operands.
+                    // Comparisons produce i1; bool operands are themselves
+                    // i1, every other operand type is i64.
+                    let operand_ty = if value_type(left, self.locals) == Type::Bool {
+                        "i1"
+                    } else {
+                        "i64"
+                    };
                     let reg = self.fresh();
-                    let _ = writeln!(out, "  {reg} = icmp {} i64 {l}, {r}", icmp_op(op));
+                    let _ = writeln!(
+                        out,
+                        "  {reg} = icmp {} {} {l}, {r}",
+                        icmp_op(op),
+                        operand_ty
+                    );
+                    reg
+                } else if matches!(op, BinOp::Div | BinOp::Mod) {
+                    // Division goes through the runtime helpers, which abort
+                    // on a zero divisor instead of hitting `sdiv`'s UB.
+                    let helper = if *op == BinOp::Div {
+                        "rune_div"
+                    } else {
+                        "rune_mod"
+                    };
+                    let reg = self.fresh();
+                    let _ = writeln!(out, "  {reg} = call i64 @{helper}(i64 {l}, i64 {r})");
                     reg
                 } else {
                     let reg = self.fresh();
@@ -698,7 +724,13 @@ impl Emitter<'_> {
                 let _ = writeln!(out, "  ret {} {v}", llvm_type(&ty));
             }
             Terminator::Return(None) => {
-                out.push_str("  ret void\n");
+                // Falling off the end returns zero, matching the C
+                // backend (and satisfying functions declared non-void).
+                if self.return_type == Type::Void {
+                    out.push_str("  ret void\n");
+                } else {
+                    let _ = writeln!(out, "  ret {} 0", llvm_type(&self.return_type));
+                }
             }
             Terminator::Jump(target) => {
                 let _ = writeln!(out, "  br label %L{target}");
@@ -746,14 +778,13 @@ fn icmp_op(op: &BinOp) -> &'static str {
     }
 }
 
-/// Arithmetic operators on i64 operands; division and remainder are signed.
+/// Non-dividing arithmetic on i64 operands; division and remainder go
+/// through the runtime helpers (see the Binary emission).
 fn arith_op(op: &BinOp) -> &'static str {
     match op {
         BinOp::Add => "add",
         BinOp::Sub => "sub",
         BinOp::Mul => "mul",
-        BinOp::Div => "sdiv",
-        BinOp::Mod => "srem",
         _ => unreachable!("non-arithmetic operator in arith"),
     }
 }

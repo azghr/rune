@@ -48,8 +48,11 @@ impl ConstFold {
                             BinOp::Add => Some(l.wrapping_add(r)),
                             BinOp::Sub => Some(l.wrapping_sub(r)),
                             BinOp::Mul => Some(l.wrapping_mul(r)),
-                            BinOp::Div if r != 0 => Some(l / r),
-                            BinOp::Mod if r != 0 => Some(l % r),
+                            // `wrapping_div` handles `INT64_MIN / -1` by
+                            // wrapping to `INT64_MIN`, matching the runtime
+                            // helpers; `r == 0` stays unevaluated.
+                            BinOp::Div if r != 0 => Some(l.wrapping_div(r)),
+                            BinOp::Mod if r != 0 => Some(l.wrapping_rem(r)),
                             _ => None,
                         },
                         _ => None,

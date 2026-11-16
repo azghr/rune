@@ -47,9 +47,38 @@ void rune_arr_set(void *arr, int64_t idx, int64_t value) {
   ((int64_t *)arr)[idx + 1] = value;
 }
 
+/* Arithmetic helpers. Division by zero aborts instead of invoking C's
+ * undefined behavior (the IR's constant folder leaves `x / 0` unevaluated,
+ * so it reaches the emitted code verbatim). `INT64_MIN / -1` overflows in
+ * C; Rune wraps, matching the constant folder. */
+static void rune_div_abort(void) {
+  fprintf(stderr, "rune: division by zero\n");
+  abort();
+}
+
+int64_t rune_div(int64_t a, int64_t b) {
+  if (b == 0) {
+    rune_div_abort();
+  }
+  if (b == -1) {
+    return a == INT64_MIN ? INT64_MIN : -a;
+  }
+  return a / b;
+}
+
+int64_t rune_mod(int64_t a, int64_t b) {
+  if (b == 0) {
+    rune_div_abort();
+  }
+  if (b == -1) {
+    return 0;
+  }
+  return a % b;
+}
+
 /* Concatenates two strings into freshly allocated storage. The result is
  * never freed: Rune strings are immutable `const char*` values, so ownership
- * is not tracked. Treat the compiler as garbage-producing for now. */
+ * is not tracked. */
 const char *rune_strcat(const char *a, const char *b) {
   size_t la = a ? strlen(a) : 0;
   size_t lb = b ? strlen(b) : 0;

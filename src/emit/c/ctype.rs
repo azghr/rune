@@ -10,9 +10,63 @@
 
 use crate::language::ast::Type;
 
+/// Every Rune identifier is a valid C identifier, but not every one is a
+/// *usable* one: C keywords (`double`, `register`, …) cannot name variables
+/// or functions. Such names are emitted with a trailing underscore
+/// (`double` → `double_`), consistently at every use site.
+pub fn c_name(name: &str) -> String {
+    if C_KEYWORDS.contains(&name) {
+        format!("{name}_")
+    } else {
+        name.to_string()
+    }
+}
+
+/// C99/C11 keywords, the names `c_name` escapes.
+const C_KEYWORDS: &[&str] = &[
+    "auto",
+    "break",
+    "case",
+    "char",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extern",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "register",
+    "restrict",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+    "while",
+    "_Bool",
+    "_Complex",
+    "_Imaginary",
+];
+
 /// Renders `TYPE NAME` as a C declaration (or an abstract declarator when
-/// `name` is empty).
+/// `name` is empty). The name goes through `c_name`.
 pub fn c_decl(ty: &Type, name: &str) -> String {
+    let name = &c_name(name);
     match ty {
         Type::Int => format!("int64_t {}", name),
         Type::Bool => format!("bool {}", name),

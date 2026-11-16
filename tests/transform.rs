@@ -564,3 +564,33 @@ fn array_elements_survive_the_passes() {
         } if matches!(&elems[0], Value::ConstInt(6))
     )));
 }
+
+#[test]
+fn const_fold_wraps_extreme_division_instead_of_panicking() {
+    // `INT64_MIN / -1` overflows; the folder must wrap (matching the
+    // runtime helpers) rather than panic the compiler.
+    let module = lowered(
+        "fn main() { let m = 9223372036854775807 let n = m + 1 print(n / -1) print(n % -1) }",
+    );
+    let main = &module.functions[0];
+    assert!(
+        main.body[0].instructions.iter().any(|i| matches!(
+            i,
+            Instruction::Move {
+                value: Value::ConstInt(i64::MIN),
+                ..
+            }
+        )),
+        "n / -1 should fold to i64::MIN"
+    );
+    assert!(
+        main.body[0].instructions.iter().any(|i| matches!(
+            i,
+            Instruction::Move {
+                value: Value::ConstInt(0),
+                ..
+            }
+        )),
+        "n % -1 should fold to 0"
+    );
+}

@@ -12,6 +12,11 @@ extern "C" {
 
 const char *rune_strcat(const char *a, const char *b);
 
+/* Arithmetic: division by zero aborts the program; `INT64_MIN / -1`
+ * wraps instead of overflowing (matching Rune's constant folder). */
+int64_t rune_div(int64_t a, int64_t b);
+int64_t rune_mod(int64_t a, int64_t b);
+
 /* Closures: a heap block whose first word is the wrapper's code pointer,
  * followed by the captured values. Function values are closure pointers,
  * so calls read the code word and pass the closure itself as the env

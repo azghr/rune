@@ -4,9 +4,44 @@ All notable changes to Rune are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-11-16
 
-Nothing yet.
+### Fixed
+
+- Identifiers that collide with C keywords (`double`, `register`, …) are
+  emitted with a trailing underscore, so programs using them as names now
+  compile through the C backend
+- Constant folding no longer panics on `INT64_MIN / -1` (it wraps, matching
+  the runtime); the smallest `i64` is emitted as a warning-free C literal
+- Division and remainder go through runtime helpers in the C and LLVM
+  backends: a zero divisor aborts with a diagnostic instead of hitting C's
+  or `sdiv`'s undefined behavior, and `INT64_MIN / -1` wraps
+- `&&` now binds tighter than `||`, matching the documented precedence
+  table (`true || false && false` is `true`)
+- `bool == bool` compares correctly in the WASM and LLVM backends (both
+  previously emitted mismatched operand widths)
+- `break`/`continue` inside an anonymous function are rejected by the
+  analyzer instead of crashing the compiler
+- Nested anonymous functions now capture transitively: a variable read only
+  by an inner lambda is captured by the enclosing lambda
+- Compound assignment (`x += v`) to a captured variable is rejected, like
+  plain assignment
+- Dead-code elimination keeps division and array reads whose result is
+  unused, so their runtime traps (zero divisor, out-of-bounds index) still
+  fire
+- Duplicate parameter names in function declarations are a compile error
+- `main` with parameters is rejected with a diagnostic
+- Non-`void` functions that fall off the end return zero in the WASM and
+  LLVM backends, matching the C backend (previously invalid output)
+- Diagnostic columns count characters, so the caret lines up after
+  multibyte characters
+
+### Changed
+
+- `rune --help` prints usage; the `--wat`/`--llvm` pipelines run the same
+  transform passes as the default C pipeline
+- Documentation refreshed: language reference gained anonymous functions
+  and closures, and the architecture notes match the current code
 
 ## [0.2.0] - 2026-11-16
 

@@ -1,9 +1,9 @@
 # Rune Compiler Architecture
 
 This document describes how the Rune compiler is structured and how a source
-file flows through the pipeline. The code is small by design — the whole
-compiler is under 1,600 lines of Rust — so it can serve as a readable example
-of a classic compiler pipeline.
+file flows through the pipeline. The code is small by design — it has no
+external dependencies and every stage fits in one or two files — so it can
+serve as a readable example of a classic compiler pipeline.
 
 ```
  source.rune
@@ -79,14 +79,14 @@ A recursive-descent parser producing the AST defined in `src/language/ast.rs`.
 
 **Statements** (`stmt.rs`, `decl.rs`): function declarations, `let` and
 `let mut` bindings (with an optional `: type` annotation), plain and compound
-assignments (`+=` etc.), `if`/`else` (including `else if` chains, which
-desugar into a block wrapping the inner if), `while`, C-style `for` with
-optional clauses, `break`/`continue` (valid only inside loops; the checker
-tracks loop nesting depth), `return`, blocks, and expression statements.
-A value-less `return` is recognized by the next token not being able to start
-an expression, so no semicolon is required before `}`. Statements are terminated by an
-optional semicolon — a line break alone is enough, since the lexer discards
-newlines.
+assignments (`+=` etc.), element assignment (`a[i] = v`), `if`/`else`
+(including `else if` chains, which desugar into a block wrapping the inner
+if), `while`, C-style `for` with optional clauses, `break`/`continue` (valid
+only inside loops; the checker tracks loop nesting depth), `return`, blocks,
+and expression statements. A value-less `return` is recognized by the next
+token not being able to start an expression, so no semicolon is required
+before `}`. Statements are terminated by an optional semicolon — a line break
+alone is enough, since the lexer discards newlines.
 
 **Expressions** (`expr.rs`) use one function per precedence level, from
 loosest to tightest:
@@ -99,7 +99,8 @@ loosest to tightest:
 | term       | `+`, `-`                                                   |
 | factor     | `*`, `/`, `%`                                              |
 | unary      | `-`, `!`                                                   |
-| primary    | literals, names, calls, `print`, parenthesized expressions |
+| postfix    | calls `f(x)`, indexing `a[i]` (chaining freely)            |
+| primary    | literals, names, array literals, `fn` (anonymous functions), `print`, `len`, parenthesized expressions |
 
 All levels build left-associative `Expr::Binary` nodes. Calls and the `print`
 builtin share the `parse_call_args` helper.
@@ -112,21 +113,29 @@ The type checker walks the AST top-down.
   global scope holds function declarations; each block pushes and pops a
   scope, implementing lexical scoping.
 - **Checker** (`checker.rs`): every expression is annotated with a `Type`
-  (`int`, `bool`, `string`, `void` — see `types.rs`). Function signatures are
-  collected in a first pass, so recursion and calls before definition work.
-  The checker verifies:
+  (`int`, `bool`, `string`, `void`, plus composite `Array(T)` and
+  `Function { params, return_type }` — see `types.rs`). Function signatures
+  are collected in a first pass, so recursion and calls before definition
+  work. The checker verifies:
   - variables are declared before use and assignments match the declared type
   - only variables declared `let mut` may be reassigned; compound
     assignments (`x += v`) are checked as `x = x <op> v`
   - `let` values match an explicit type annotation when one is given, and are
     not `void`
   - calls resolve to a declared function with matching argument count and
-    types; the return type flows into the surrounding expression
+    types; the return type flows into the surrounding expression. Calling
+    through a local holding a function value (`f(x)`) checks against the
+    value's signature
+  - array literals have a consistent element type; indexing operates on
+    arrays with an `int` index; `len` takes exactly one array argument
   - `+` accepts two strings (concatenation) but rejects mixing strings and
     numbers; other arithmetic requires numbers
   - `if`/`while`/`for` conditions are `bool`
   - `break` and `continue` appear only inside loops
-  - `==`/`!=` accept same-type operands, including strings
+  - `==`/`!=` accept same-type operands, including strings (but not arrays)
+  - anonymous functions capture outer variables **by value**: reads
+    type-check against the captured variable's type, and assignment to a
+    captured variable is rejected (captures are snapshots)
 - Errors are collected in a list and reported together when checking finishes.
 
 Note: the current checker resolves functions globally, so recursion (see
@@ -278,9 +287,12 @@ gcc output.c runtime/rune_rt.c -o output -I.
 
 `src/transform/ir.rs` defines a small three-address IR: a `Module` of
 `Function`s, each a list of `BasicBlock`s ending in a `Terminator`
-(`Return`, `Jump`, or `Branch`). Instructions are `Binary`, `Unary`, `Move`,
-and `Call` over `Value`s (constants or locals), and every instruction records
-its result type.
+(`Return`, `Jump`, or `Branch`). Instructions cover `Binary`/`Unary`/`Move`
+arithmetic, direct and indirect calls (`Call`, `CallIndirect` through
+closure pointers), closure and array allocation (`MakeClosure`,
+`MakeArray`), and bounds-checked element access (`IndexGet`, `IndexSet`,
+`ArrLen`) — all over `Value`s (constants or locals), with every instruction
+recording its result type.
 
 This IR is the natural seam for adding a second backend (LLVM, WASM): new
 emitters read the same `Module` the C emitter does.
@@ -297,12 +309,8 @@ emitters read the same `Module` the C emitter does.
 
 ## Current Limitations
 
-- No first-class strings, arrays, or structs (strings support comparison
-  and concatenation, but cannot be stored in containers; concatenation
-  results are leaked by design — see the runtime section)
-- `DeadCodeElim` uses a function-global used-set, so dead stores whose
-  variables are read _somewhere_ are kept; a precise liveness analysis would
-  remove more
+- No structs or tuples; arrays exist (see the language reference) but cannot
+  be compared or printed
 - `ConstFold` propagation is per-block, so constants never cross block
   boundaries
 - IR-based `output.c` uses `goto` labels rather than structured `if`/`while`
@@ -310,5 +318,7 @@ emitters read the same `Module` the C emitter does.
 - Both C emitters re-derive expression types during their walks instead of
   the checker annotating the AST — fine at this scale, but a types-on-AST
   refactor is the cleaner long-term design
+- The reference AST-to-C emitter (`generator.rs`) predates arrays and
+  closures and panics on programs using them; the IR pipeline handles both
 
 See the [Roadmap](../README.md#roadmap) in the README for planned work.

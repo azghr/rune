@@ -469,3 +469,23 @@ fn array_literal_requires_closing_bracket() {
     let err = common::parse_error("fn main() { let a = [1, 2 }");
     assert!(err.message.contains("expected `]`"));
 }
+
+#[test]
+fn and_binds_tighter_than_or() {
+    // `a || b && c` must parse as `a || (b && c)`.
+    let func = only_function("fn main() { let x = true || false && true }");
+    let Stmt::Let { value, .. } = &func.body.statements[0] else {
+        panic!("expected let");
+    };
+    let Expr::Binary { op, right, .. } = value else {
+        panic!("expected binary expr");
+    };
+    assert_eq!(*op, TokenKind::PipePipe);
+    assert!(matches!(
+        right.as_ref(),
+        Expr::Binary {
+            op: TokenKind::AmpAmp,
+            ..
+        }
+    ));
+}

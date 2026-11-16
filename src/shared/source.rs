@@ -35,7 +35,12 @@ impl SourceFile {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
         };
-        let col = span.start - self.line_starts[line];
+        // Columns count characters, not bytes, so the caret under the
+        // source line lines up even with multibyte characters before the
+        // span.
+        let col = self.content[self.line_starts[line]..span.start]
+            .chars()
+            .count();
         (line + 1, col + 1) // 1-based
     }
 

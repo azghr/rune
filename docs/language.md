@@ -95,6 +95,29 @@ fn greet(name: string) {
   may be omitted for functions that return nothing.
 - Recursion works, and functions may be called before they are defined.
 
+## Anonymous functions and closures
+
+```rust
+fn main() {
+    let double = fn(n: int) -> int { return n * 2 }
+    print(double(21))       // 42
+
+    let base = 10
+    let addbase = fn(n: int) -> int { return n + base }
+    print(addbase(5))       // 15: `base` is captured
+}
+```
+
+- An anonymous function is an expression: `fn(params) -> ret { body }`, with
+  the same syntax as a named function minus the name. It can appear anywhere
+  a value can and is stored in a variable to be called later.
+- The body's reads of outer variables **capture** them by value at the time
+  the closure is created; later changes to the original are not visible.
+- Assigning to a captured variable inside the closure is a compile-time
+  error — captures are snapshots.
+- Captures work across arrays and nested closures; function values can be
+  stored in arrays.
+
 ## Operators
 
 From loosest to tightest binding:
@@ -114,6 +137,8 @@ All binary operators are left-associative. Rules to know:
 
 - `&&` and `||` short-circuit: the right operand is only evaluated when the
   left operand allows it.
+- Division (or remainder) by zero aborts the program with a diagnostic;
+  integer arithmetic wraps on overflow.
 - Comparisons and equality require two operands of the same type; string
   comparison compares **contents**.
 - `+` concatenates two strings; mixing strings and numbers is an error.
@@ -146,7 +171,9 @@ for let mut i = 0; i < 10; i += 1 {
   infinite loop.
 - **`break`** exits the innermost loop; **`continue`** skips to the next
   iteration. In a `for` loop, `continue` still runs the step clause
-  (C semantics). Both are errors outside any loop.
+  (C semantics). Both are errors outside any loop — including inside an
+  anonymous function nested in a loop, since the lambda's body is its own
+  function.
 
 ## Returning
 
@@ -174,10 +201,10 @@ fn fib(n: int) -> int {
 
 ## Program structure
 
-A program is a sequence of function declarations. Execution starts at `main`
-(the compiler gives it a C-compatible `int main()` with an implicit
-`return 0`). All functions are emitted with forward declarations, so
-definition order never matters.
+A program is a sequence of function declarations. Execution starts at `main`,
+which must take no parameters (the compiler gives it a C-compatible
+`int main()` with an implicit `return 0`). All functions are emitted with
+forward declarations, so definition order never matters.
 
 ## Current limitations
 
@@ -186,5 +213,5 @@ definition order never matters.
 - No type inference beyond `let` bindings; no enums or sum types
 - Concatenated strings are heap-allocated and never freed (no ownership
   tracking yet)
-- Integer arithmetic uses wrapping semantics at the optimization pass level
-  (e.g. constant folding), matching Rust's release-mode behavior
+- Integer arithmetic wraps on overflow (both in constant folding and at
+  runtime, matching Rust's release-mode behavior)

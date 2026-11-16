@@ -6,7 +6,7 @@ use crate::diagnostics::diagnostic::{Diagnostic, Severity};
 use crate::shared::source::SourceFile;
 
 pub struct Reporter<'a> {
-    source: &'a SourceFile, // borrows
+    source: &'a SourceFile,
 }
 
 impl<'a> Reporter<'a> {

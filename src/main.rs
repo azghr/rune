@@ -7,24 +7,44 @@ use std::env;
 use std::fs;
 use std::process::{self, Command};
 
+/// Prints the command-line help text.
+fn print_usage() {
+    println!(
+        "Rune compiler\n\
+         \n\
+         Usage: rune [OPTION] <file.rune>\n\
+         \n\
+         Options:\n\
+         \x20 --wat       print the WebAssembly text format instead of building\n\
+         \x20 --llvm      write output.ll and build it with clang\n\
+         \x20 -h, --help  show this help\n\
+         \n\
+         With no option, the file is compiled to C, built with gcc, and the\n\
+         executable is written to ./output."
+    );
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_usage();
+        return;
+    }
 
     // `rune --wat <file.rune>` prints the WebAssembly text format and exits.
     // `rune --llvm <file.rune>` writes output.ll, compiles it with clang,
     // and produces ./output.
-    let flag = args.get(1).cloned();
-    let backend = match (args.len(), flag.as_deref()) {
-        (2, _) => None,
-        (3, Some("--wat")) => Some("--wat"),
-        (3, Some("--llvm")) => Some("--llvm"),
+    let (backend, path) = match args.as_slice() {
+        [path] => (None, path.as_str()),
+        [backend, path] if backend == "--wat" || backend == "--llvm" => {
+            (Some(backend.as_str()), path.as_str())
+        }
         _ => {
             eprintln!("Usage: rune [--wat | --llvm] <file.rune>");
             process::exit(1);
         }
     };
-
-    let path = &args[args.len() - 1];
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -34,28 +54,9 @@ fn main() {
     };
 
     if let Some(backend) = backend {
-        use rune::language::analyze::Analyzer;
-        use rune::language::lexer::Lexer;
-        use rune::language::parser::Parser;
-        use rune::shared::source::SourceFile;
-        use rune::transform::lower_program;
-
-        let source_file = SourceFile::new(path, &source);
-        let lowered = Lexer::new(&source_file)
-            .tokenize()
-            .and_then(|tokens| Parser::new(tokens).parse())
-            .map_err(|e| {
-                rune::diagnostics::Reporter::new(&source_file).report(&e);
-                "compilation failed".to_string()
-            })
-            .and_then(|program| {
-                Analyzer::new().analyze(program).map_err(|errors| {
-                    rune::diagnostics::Reporter::new(&source_file).report_all(&errors);
-                    "compilation failed".to_string()
-                })
-            })
-            .map(|program| lower_program(&program));
-        let lowered = match lowered {
+        // Same front end and passes as the C pipeline; only the emitter
+        // differs.
+        let lowered = match Compiler::lower(path, &source) {
             Ok(module) => module,
             Err(msg) => {
                 eprintln!("{msg}");
